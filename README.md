@@ -20,7 +20,7 @@
 
 启动时若素材缺失，程序会弹出说明框指出缺什么、去哪里取，而不是报一句看不懂的错误。
 
-不想装 Python：到 [Releases](../../releases) 把 `多多.exe` 与 `frames_opt.zip` 一起下载，解压到**同一个文件夹**（`多多.exe` 与 `frames_opt/` 并列），双击 exe 即可；首次运行会自动生成 `config.json`，填上 api_key 后重启就能聊天。exe 未做代码签名，Windows SmartScreen 可能拦一下，点「更多信息 → 仍要运行」。它由仓库里的 `build_exe.py` 打包，可以自己重新构建。
+不想装 Python：到 [Releases](../../releases) 把 `duoduo.exe` 与 `frames_opt.zip` 一起下载，解压到**同一个文件夹**（`duoduo.exe` 与 `frames_opt/` 并列），双击 exe 即可；首次运行会自动生成 `config.json`，填上 api_key 后重启就能聊天。exe 未做代码签名，Windows SmartScreen 可能拦一下，点「更多信息 → 仍要运行」。它由仓库里的 `build_exe.py` 打包（本地构建出来的文件名是 `多多.exe`，与发布包里的 `duoduo.exe` 是同一个东西），可以自己重新构建。
 
 ## 安装与启动
 
