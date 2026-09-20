@@ -1,0 +1,24 @@
+{
+  "_说明": "复制这个文件为 config.json 再填自己的 key（config.json 已被 .gitignore 忽略，不会上传）",
+  "api_base": "https://api.deepseek.com/v1",
+  "api_key": "在这里填你的 key",
+  "model": "deepseek-chat",
+  "timeout": 30,
+  "temperature": 1.1,
+  "max_tokens": 300,
+  "history_turns": 6,
+  "tts": {
+    "engine": "auto",
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "-4%",
+    "pitch": "+10Hz",
+    "volume": "+0%",
+    "edge_proxy": "auto",
+    "onecore_voice": "Yaoyao",
+    "onecore_pitch": "+30%",
+    "onecore_rate": "1.2",
+    "sapi_pitch": 20,
+    "sapi_speed": 1,
+    "cache": 80
+  }
+}
