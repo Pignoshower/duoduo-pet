@@ -1389,6 +1389,72 @@ def parse_run_request(text):
     return cmd
 
 
+
+# =====================================================================
+# 6.6 安静模式 / 免打扰时段
+# =====================================================================
+QUIET_ON_WORDS = ("开启安静", "打开安静", "开启免打扰", "打开免打扰", "别吵", "安静点", "我要专注",
+                  "不要说话", "静音模式", "免打扰模式", "安静模式")
+QUIET_OFF_WORDS = ("关闭安静", "关闭免打扰", "取消安静", "取消免打扰", "可以说话", "恢复说话",
+                   "解除安静", "别安静了")
+QUIET_RANGE_PAT = re.compile(
+    r"(\d{1,2}|[零一二两三四五六七八九十]{1,3})\s*(?:[:：点时]\s*(\d{1,2}|半)?)?\s*"
+    r"(?:到|至|-|~)\s*(\d{1,2}|[零一二两三四五六七八九十]{1,3})\s*(?:[:：点时]\s*(\d{1,2}|半)?)?")
+
+
+def _hm(hour_tok, minute_tok):
+    h = _cn_to_int(hour_tok) if hour_tok else None
+    if minute_tok == "半":
+        m = 30
+    else:
+        m = _cn_to_int(minute_tok) if minute_tok else 0
+    if h is None or m is None or not (0 <= h <= 23) or not (0 <= m <= 59):
+        return None
+    return (h, m)
+
+
+def parse_quiet_request(text):
+    """
+    解析安静模式指令，返回 dict 或 None：
+      {"enable": True/False}                      # 开关
+      {"enable": True, "start": (h,m), "end": (h,m)}  # 带时段，例如"晚上11点到早上7点别吵我"
+    """
+    if not text:
+        return None
+    t = text.strip()
+    if any(w in t for w in ("吵", "打扰", "安静", "免打扰", "说话")):
+        # 抽出两个时刻：优先阿拉伯数字，其次中文数字（比一条大正则稳得多）
+        nums = re.findall(r"\d{1,2}", t)
+        if len(nums) < 2:
+            nums = re.findall(r"[零一二两三四五六七八九十]{1,3}", t)
+        if len(nums) >= 2 and any(w in t for w in ("到", "至", "-", "~")):
+            a, b = _hm(nums[0], None), _hm(nums[1], None)
+            if a and b:
+                # "晚上11点"里的 11 要补成 23
+                if any(w in t for w in ("下午", "晚上", "傍晚", "今晚")) and a[0] < 12:
+                    a = (a[0] + 12, a[1])
+                return {"enable": True, "start": a, "end": b}
+    if any(w in t for w in QUIET_OFF_WORDS):
+        return {"enable": False}
+    if any(w in t for w in QUIET_ON_WORDS):
+        return {"enable": True}
+    return None
+
+
+def in_quiet_hours(now_hm, start, end):
+    """纯函数：当前时刻是否落在免打扰时段内（支持跨零点，如 23:00-07:00）。"""
+    if not start or not end:
+        return False
+    cur = now_hm[0] * 60 + now_hm[1]
+    s = start[0] * 60 + start[1]
+    e = end[0] * 60 + end[1]
+    if s == e:
+        return False
+    if s < e:
+        return s <= cur < e
+    return cur >= s or cur < e
+
+
 def human_delay(secs):
     """把秒数说成人话：90 -> '1分30秒'"""
     secs = int(secs)

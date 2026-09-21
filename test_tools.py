@@ -476,6 +476,22 @@ check("运行解析", tools.parse_run_request("运行 ipconfig /all") == "ipconf
       str(tools.parse_run_request("运行 ipconfig /all")))
 check("运行解析·不误判闲聊", tools.parse_run_request("你运行得很好") is None)
 
+# ---------- 安静模式 / 免打扰时段 ----------
+check("安静·开启", tools.parse_quiet_request("开启安静模式") == {"enable": True})
+check("安静·口语", tools.parse_quiet_request("别吵我") == {"enable": True}
+      and tools.parse_quiet_request("安静点") == {"enable": True})
+check("安静·关闭", tools.parse_quiet_request("关闭安静模式") == {"enable": False}
+      and tools.parse_quiet_request("可以说话了") == {"enable": False})
+_q = tools.parse_quiet_request("晚上11点到早上7点别打扰我")
+check("安静·时段", _q and _q.get("start") == (23, 0) and _q.get("end") == (7, 0), str(_q))
+check("安静·时段简写", (tools.parse_quiet_request("9点到18点别打扰") or {}).get("start") == (9, 0))
+check("安静·不误判", tools.parse_quiet_request("今天天气不错") is None)
+check("跨零点判断·深夜在内", tools.in_quiet_hours((2, 30), (23, 0), (7, 0)) is True)
+check("跨零点判断·白天在外", tools.in_quiet_hours((12, 0), (23, 0), (7, 0)) is False)
+check("同时段判断", tools.in_quiet_hours((10, 0), (9, 0), (18, 0)) is True
+      and tools.in_quiet_hours((20, 0), (9, 0), (18, 0)) is False)
+check("时段为空则不静音", tools.in_quiet_hours((3, 0), None, None) is False)
+
 print("=" * 46)
 failed = [n for n, ok in results if not ok]
 print(f"PASS {len(results) - len(failed)}/{len(results)}")

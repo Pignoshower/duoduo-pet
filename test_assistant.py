@@ -707,6 +707,34 @@ try:
         pet._pending_delete = None
         pet._last_found = []
 
+    # ---- 安静模式：不发声但照常冒泡 ----
+    _said = []
+    _real_say = pet.speaker.say
+    try:
+        pet.speaker.say = lambda *a, **k: _said.append(a)
+        pet.set_quiet_mode(True)
+        check("安静模式开启", pet.quiet_mode and pet._is_quiet_now())
+        pet.speak("安静测试", 2000)
+        check("安静时不发声", _said == [], str(_said))
+        check("安静时气泡照常", "安静测试" in pet.bubble.label.text(), pet.bubble.label.text()[:20])
+        pet.set_quiet_mode(False)
+        pet.quiet_range = None     # 清掉存档里残留的免打扰时段，否则深夜跑测试会一直被静音
+        _said.clear()
+        pet.speak("正常测试", 2000)
+        check("关闭安静后恢复发声", len(_said) == 1, str(len(_said)))
+        r = pet.brain._handle_local("晚上11点到早上7点别打扰我")
+        check("时段意图被识别", r[1] and r[1][0] == "quiet" and r[1][1]["start"] == (23, 0), str(r))
+        pet._do_command("quiet", r[1][1])
+        check("时段写入存档", pet.pet_data.get("quiet_range") == [23, 0, 7, 0],
+              str(pet.pet_data.get("quiet_range")))
+        check("状态说明含时段", "23:00" in pet.quiet_status_text(), pet.quiet_status_text())
+    finally:
+        pet.speaker.say = _real_say
+        pet.set_quiet_mode(False)
+        pet.quiet_range = None
+        pet.pet_data["quiet_range"] = None
+        pet._save_now()
+
     # ---- 敏感操作闸门：开控制台 / 运行命令（打桩，不真开窗口不真跑）----
     box = []
     _real_launch, _real_run = pet.launch_console, pet.run_command

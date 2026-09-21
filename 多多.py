@@ -258,6 +258,12 @@ class AIBrain:
             ctx = getattr(self.pet, "_file_context", None)
             return (f"我记得的是「{ctx['name']}」，还能接着问我它的细节喵~" if ctx
                     else "喵？主人还没拖文件给我呢"), None
+        quiet = tools.parse_quiet_request(text)
+        if quiet:
+            return None, ("quiet", quiet)
+        if any(k in low for k in ("安静模式", "免打扰", "别吵我", "安静点", "现在安静吗")):
+            if any(k in low for k in ("状态", "现在", "吗", "开着")):
+                return ("quiet_status", None), None
         if any(k in low for k in ("全屏避让", "全屏时躲起来", "全屏自动隐藏", "游戏模式")):
             if any(k in low for k in ("关闭", "关掉", "别", "不要", "取消")):
                 return None, ("avoid_fs", False)
@@ -698,6 +704,8 @@ class PetCat(QWidget):
         self._file_context = None    # 拖进来的文件（后续可追问），见 handle_dropped_files
         self._pending_delete = None  # 等待确认的待删清单（确认后才进回收站）
         self._pending_sensitive = None  # 等待确认的敏感操作（控制台 / 运行命令）
+        self.quiet_mode = bool(self.pet_data.get("quiet_mode", 0))   # 安静模式
+        self.quiet_range = tuple(self.pet_data.get("quiet_range") or ()) or None
         self.clip_history = tools.ClipboardHistory(10)
         self._clip_seen = ""         # 上一次看到的剪贴板内容（用于轮询）
 
@@ -1321,7 +1329,7 @@ class PetCat(QWidget):
         """
         self.bubble.show_message(text, duration)
         self.update_ui_positions()
-        if self.voice_on and text:
+        if self.voice_on and text and not self._is_quiet_now():
             spoken = re.sub(r"[^\w\s\u4e00-\u9fff，。！？、：；（）%.]", "", text)
             spoken = spoken.replace("\n", "，")[:120]
             if spoken.strip():
@@ -1756,6 +1764,10 @@ class PetCat(QWidget):
             (("✅ 全屏时自动避让：开" if self.avoid_fullscreen else "⬜ 全屏时自动避让：关")), self)
         self._fs_action.triggered.connect(lambda: self.speak(self.set_avoid_fullscreen()))
         set_menu.addAction(self._fs_action)
+        self._quiet_action = QAction(
+            ("🔇 安静模式：开" if self.quiet_mode else "🔊 安静模式：关"), self)
+        self._quiet_action.triggered.connect(lambda: self.speak(self.set_quiet_mode(), 5000))
+        set_menu.addAction(self._quiet_action)
         status_action = QAction("❤️ 状态面板", self)
         status_action.triggered.connect(self.check_status)
         set_menu.addAction(status_action)
@@ -1833,6 +1845,13 @@ class PetCat(QWidget):
             self.speak(self.add_reminder(secs, msg), 6000)
         elif cmd == "schedule":
             self.speak(self.add_schedule(args[0] if args else {}), 7000)
+        elif cmd == "quiet":
+            spec = args[0] if args else {}
+            if spec.get("enable") is None and not spec.get("start"):
+                self.speak(self.quiet_status_text(), 6000)
+            else:
+                self.speak(self.set_quiet_mode(spec.get("enable"), spec.get("start"),
+                                               spec.get("end")), 6000)
         elif cmd == "avoid_fs":
             want = args[0] if args else None
             if want is None or want == self.avoid_fullscreen:
@@ -2090,6 +2109,47 @@ class PetCat(QWidget):
             f"{modes[mode]}：\n\n{text[:1200]}", self.cat_name, self.affection,
             lambda t, a, tl, mo=None: self.llm_reply.emit(t, a or "", tl, mo or ""))
 
+    # ---- 安静模式 / 免打扰时段 ----
+    def _is_quiet_now(self):
+        """现在是否该安静：手动开关，或落在设定的时段里（支持跨零点）。"""
+        if self.quiet_mode:
+            return True
+        if self.quiet_range and len(self.quiet_range) == 4:
+            import datetime as _dt
+            now = _dt.datetime.now()
+            return tools.in_quiet_hours((now.hour, now.minute),
+                                        (self.quiet_range[0], self.quiet_range[1]),
+                                        (self.quiet_range[2], self.quiet_range[3]))
+        return False
+
+    def set_quiet_mode(self, enable=None, start=None, end=None):
+        """开关安静模式；带 start/end 就是"每天这个时段别吵我"。"""
+        if start and end:
+            self.quiet_range = (start[0], start[1], end[0], end[1])
+            self.pet_data["quiet_range"] = list(self.quiet_range)
+            self.quiet_mode = True if enable is None else bool(enable)
+            self.pet_data["quiet_mode"] = 1 if self.quiet_mode else 0
+            self._save_now()
+            return (f"好，{start[0]:02d}:{start[1]:02d} 到 {end[0]:02d}:{end[1]:02d} 我都不出声，"
+                    f"有事就冒个泡喵~")
+        if enable is None:
+            self.quiet_mode = not self.quiet_mode
+        else:
+            self.quiet_mode = bool(enable)
+        self.pet_data["quiet_mode"] = 1 if self.quiet_mode else 0
+        self._save_now()
+        if self.quiet_mode:
+            return "喵…我安静下来啦，不吵主人（你说「关闭安静」我就恢复）"
+        return "好啦，我又可以喵喵叫了~"
+
+    def quiet_status_text(self):
+        when = ""
+        if self.quiet_range and len(self.quiet_range) == 4:
+            when = f"，安静时段 {self.quiet_range[0]:02d}:{self.quiet_range[1]:02d}-" \
+                   f"{self.quiet_range[2]:02d}:{self.quiet_range[3]:02d}"
+        state = "开着" if self.quiet_mode else "关着"
+        return f"安静模式现在是「{state}」{when}；现在{'该安静' if self._is_quiet_now() else '可以出声'}喵"
+
     # ---- 敏感操作：统一确认闸门（打开控制台 / 删除指定路径 / 运行命令）----
     def ask_sensitive(self, kind, payload, preview):
         """把"将要发生什么"说清楚，等主人确认；确认前一律不动手。"""
@@ -2255,6 +2315,8 @@ class PetCat(QWidget):
     # ---- 看家 / 专注模式 ----
     def _focus_tick(self):
         """每 20 秒判一次：离开→去睡、回来→打招呼、久坐→提醒休息。"""
+        if self._is_quiet_now():
+            return                      # 安静模式/免打扰时段：不主动搭话
         if not self.focus_mode:
             return
         idle = app_health.idle_seconds()
