@@ -719,6 +719,27 @@ try:
         pet._pending_delete = None
         pet._last_found = []
 
+    # ---- 多显示器：定位/吸附/散步都跟着所在屏 ----
+    from PyQt6.QtCore import QRect
+    rect = pet._screen_rect()
+    check("能拿到所在屏可用区域", isinstance(rect, QRect) and rect.width() > 0, str(rect))
+    check("所在屏与主屏一致时不报错", rect.width() == QApplication.primaryScreen().availableGeometry().width())
+    pet.move(-6000, -6000)                 # 模拟"存档位置落在已拔掉的显示器上"
+    moved = pet._ensure_on_screen()
+    check("位置越界会被挪回可见屏幕",
+          moved and any(sc.availableGeometry().contains(pet.frameGeometry().center())
+                        for sc in QApplication.screens()),
+          f"moved={moved} pos=({pet.x()},{pet.y()})")
+    pet.move(rect.right() - 4, rect.top() + 100)     # 贴着右边缘
+    pet._snap_to_edge()
+    check("吸附到所在屏边缘（不会飞到别处）",
+          rect.left() - 2 <= pet.x() <= rect.right() + 2, f"x={pet.x()} 屏={rect}")
+    pet.move(rect.left() + 60, rect.top() + 200)
+    ok_pace = pet._start_pace()
+    check("能在所在屏内散步", bool(ok_pace) or pet.pacing, f"pacing={pet.pacing}")
+    pet.pacing = False
+    pet.move(rect.left() + 60, rect.bottom() - pet.height() - 40)
+
     # ---- 长期记忆：记住 / 列出 / 注入提示词 / 忘掉 ----
     pet.memories = []
     pet.pet_data["memories"] = []

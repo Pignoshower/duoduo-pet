@@ -508,7 +508,9 @@ class ChatBubble(QWidget):
 
     # ---- 自适应尺寸：按内容长度选宽度，超高则滚动 ----
     def _fit(self, text_len):
-        screen = QApplication.primaryScreen().availableGeometry()
+        # 跟着气泡所在的屏幕，副屏上也不会超出边界
+        scr = self.screen() or QApplication.primaryScreen()
+        screen = scr.availableGeometry()
         max_w = min(380, screen.width() - 60)
         max_h = int(screen.height() * 0.55)
         if text_len <= 40:
@@ -756,6 +758,7 @@ class PetCat(QWidget):
 
         if self.pet_data['last_pos_x'] != -1 and self.pet_data['last_pos_y'] != -1:
             self.move(self.pet_data['last_pos_x'], self.pet_data['last_pos_y'])
+            self._ensure_on_screen()
         else:
             screen = QApplication.primaryScreen().geometry()
             self.move((screen.width() - self.width()) // 2, int(screen.height() * 0.55))
@@ -1300,8 +1303,38 @@ class PetCat(QWidget):
         except Exception as e:
             return self.speak(f"喵…打不开（{e.__class__.__name__}）", 4000)
 
+    # ---- 多显示器：一切都跟着小猫所在的屏幕 ----
+    def _screen_rect(self):
+        """小猫当前所在屏幕的可用区域（拿不到就退回主屏）。"""
+        try:
+            scr = self.screen() or QApplication.primaryScreen()
+            return scr.availableGeometry()
+        except Exception:
+            return QApplication.primaryScreen().availableGeometry()
+
+    def _screen_origin(self):
+        try:
+            scr = self.screen() or QApplication.primaryScreen()
+            return scr.geometry()
+        except Exception:
+            return QApplication.primaryScreen().geometry()
+
+    def _ensure_on_screen(self):
+        """存档里的位置如果落在已拔掉的显示器上，就挪回可见屏幕里。"""
+        try:
+            here = self.frameGeometry().center()
+            for scr in QApplication.screens():
+                if scr.availableGeometry().contains(here):
+                    return False
+            wa = QApplication.primaryScreen().availableGeometry()
+            self.move(wa.right() - self.width() - 40, wa.bottom() - self.height() - 60)
+            app_health.log("原位置不在任何屏幕上（可能拔掉了显示器），已挪回主屏")
+            return True
+        except Exception:
+            return False
+
     def update_ui_positions(self):
-        wa = QApplication.primaryScreen().availableGeometry()
+        wa = self._screen_rect()
         if self.bubble.isVisible():
             bx = self.x() + self.width() - 120
             by = self.y() - self.bubble.height() + 40
@@ -1380,7 +1413,7 @@ class PetCat(QWidget):
     def take_screenshot(self):
         """截取全屏并保存到桌面。"""
         try:
-            screen = QApplication.primaryScreen()
+            screen = self.screen() or QApplication.primaryScreen()
             pix = screen.grabWindow(0)
             if pix.isNull():
                 return "喵…这次截不到屏幕呢"
@@ -1669,7 +1702,7 @@ class PetCat(QWidget):
     def _snap_to_edge(self):
         """拖拽结束后，靠边 40px 内自动吸附到该屏幕边缘。"""
         try:
-            wa = QApplication.primaryScreen().availableGeometry()
+            wa = self._screen_rect()
             margin = 40
             x, y = self.x(), self.y()
             if x - wa.left() < margin:
@@ -2521,7 +2554,7 @@ class PetCat(QWidget):
     def _start_pace(self, short=False):
         if self.pacing: return False
         walk_state = 'walk' if self.animations.get('walk') else 'idle'
-        wa = QApplication.primaryScreen().availableGeometry()
+        wa = self._screen_rect()
         margin = 8
         left, right = wa.left() + margin, wa.right() - self.width() - margin
         if right <= left: return False
