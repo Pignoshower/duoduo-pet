@@ -719,6 +719,33 @@ try:
         pet._pending_delete = None
         pet._last_found = []
 
+    # ---- 长期记忆：记住 / 列出 / 注入提示词 / 忘掉 ----
+    pet.memories = []
+    pet.pet_data["memories"] = []
+    r = pet.brain._handle_local("记住 我周四有例会")
+    check("记忆指令被识别", r[1] == ("memory", {"action": "add", "text": "我周四有例会"}), str(r))
+    pet._do_command("memory", r[1][1])
+    check("记住一条", pet.memories == ["我周四有例会"], str(pet.memories))
+    check("写进存档", pet.pet_data.get("memories") == ["我周四有例会"], str(pet.pet_data.get("memories")))
+    pet._do_command("memory", {"action": "add", "text": "我周四有例会"})
+    check("重复内容不会记两遍", len(pet.memories) == 1, str(pet.memories))
+    pet._do_command("memory", {"action": "list"})
+    check("能列出来", "周四有例会" in pet.bubble.label.text(), pet.bubble.label.text()[:30])
+    # 提问时带上记忆
+    captured = []
+    pet.brain.llm.cfg["api_key"] = "test"
+    pet.brain.llm.chat = lambda t, name="多多", aff=0: (captured.append(t) or "喵")
+    pet._do_command("memory", {"action": "add", "text": "牛奶快没了"})
+    pet.handle_user_message("我明天要干什么")
+    pump(900)
+    check("提问带上长期记忆", captured and "周四有例会" in captured[-1], str(captured[-1:])[:70])
+    pet.brain.llm.__dict__.pop("chat", None)
+    pet.brain.llm.cfg["api_key"] = ""
+    pet._do_command("memory", {"action": "forget", "index": 1})
+    check("按序号忘掉", len(pet.memories) == 1 and "牛奶" in pet.memories[0], str(pet.memories))
+    pet._do_command("memory", {"action": "clear"})
+    check("清空备忘", pet.memories == [] and pet.pet_data.get("memories") == [])
+
     # ---- 安静模式：不发声但照常冒泡 ----
     _said = []
     _real_say = pet.speaker.say

@@ -258,6 +258,9 @@ class AIBrain:
             ctx = getattr(self.pet, "_file_context", None)
             return (f"我记得的是「{ctx['name']}」，还能接着问我它的细节喵~" if ctx
                     else "喵？主人还没拖文件给我呢"), None
+        mem_req = tools.parse_memory_request(text)
+        if mem_req:
+            return None, ("memory", mem_req)
         quiet = tools.parse_quiet_request(text)
         if quiet:
             return None, ("quiet", quiet)
@@ -436,6 +439,10 @@ class AIBrain:
                 # 把"当前参考文件"带进这次提问，主人就能追问细节；说"忘掉这个文件"可清掉
                 ask = (f"（参考文件《{ctx['name']}》的内容如下，可能和主人这句话相关）\n"
                        f"{ctx['text'][:3000]}\n\n主人说：{text}")
+            _mems = getattr(self.pet, "memories", None)
+            if _mems:
+                # 长期记忆：主人让我记住的事，每次提问都带上（说"我的备忘"可查看）
+                ask = "（主人以前让我记住的事：" + "；".join(_mems[:8]) + "）\n\n主人说：" + ask
             self.llm.ask_async(ask, self.pet.cat_name, self.pet.affection,
                                lambda t, a, tool, mood=None: self.pet.llm_reply.emit(t, a or "", tool, mood or ""))
             return None, None, True
@@ -706,6 +713,7 @@ class PetCat(QWidget):
         self._pending_sensitive = None  # 等待确认的敏感操作（控制台 / 运行命令）
         self.quiet_mode = bool(self.pet_data.get("quiet_mode", 0))   # 安静模式
         self.quiet_range = tuple(self.pet_data.get("quiet_range") or ()) or None
+        self.memories = [m for m in (self.pet_data.get("memories") or []) if isinstance(m, str)]
         self.clip_history = tools.ClipboardHistory(10)
         self._clip_seen = ""         # 上一次看到的剪贴板内容（用于轮询）
 
@@ -1845,6 +1853,20 @@ class PetCat(QWidget):
             self.speak(self.add_reminder(secs, msg), 6000)
         elif cmd == "schedule":
             self.speak(self.add_schedule(args[0] if args else {}), 7000)
+        elif cmd == "memory":
+            spec = args[0] if args else {"action": "list"}
+            act = spec.get("action")
+            if act == "add":
+                self.speak(self.add_memory(spec.get("text", "")), 6000)
+            elif act == "clear":
+                self.memories = []
+                self.pet_data["memories"] = []
+                self._save_now()
+                self.speak("备忘都清掉啦", 4000)
+            elif act == "forget":
+                self.speak(self.forget_memory(spec), 7000)
+            else:
+                self.speak(self.memories_text(), 14000)
         elif cmd == "quiet":
             spec = args[0] if args else {}
             if spec.get("enable") is None and not spec.get("start"):
@@ -2108,6 +2130,47 @@ class PetCat(QWidget):
         return self.brain.llm.ask_async(
             f"{modes[mode]}：\n\n{text[:1200]}", self.cat_name, self.affection,
             lambda t, a, tl, mo=None: self.llm_reply.emit(t, a or "", tl, mo or ""))
+
+    # ---- 长期记忆 ----
+    def add_memory(self, text):
+        text = (text or "").strip()
+        if len(text) < 2:
+            return "喵？要记住什么呢"
+        if text in self.memories:
+            return f"这个我已经记住啦：{text}"
+        self.memories.insert(0, text)
+        del self.memories[tools.MEMORY_LIMIT:]
+        self.pet_data["memories"] = self.memories
+        self._save_now()
+        app_health.log(f"记住一条：{text}")
+        return f"记住啦：{text}（现在一共记着 {len(self.memories)} 条）"
+
+    def forget_memory(self, spec):
+        if not self.memories:
+            return "我还没记着什么呢"
+        idx = spec.get("index")
+        if idx:
+            if 1 <= idx <= len(self.memories):
+                gone = self.memories.pop(idx - 1)
+                self.pet_data["memories"] = self.memories
+                self._save_now()
+                return f"好，我忘掉这条：{gone}"
+            return f"喵…只记着 {len(self.memories)} 条，没有第 {idx} 条"
+        key = (spec.get("text") or "").strip()
+        hit = [m for m in self.memories if key and key in m]
+        if not hit:
+            return f"没找到和「{key}」有关的备忘，说「我的备忘」我念给你听"
+        for h in hit:
+            self.memories.remove(h)
+        self.pet_data["memories"] = self.memories
+        self._save_now()
+        return "好，忘掉啦：" + "；".join(hit[:3])
+
+    def memories_text(self):
+        if not self.memories:
+            return "我还没记着什么，跟我说「记住 我周四有例会」就行喵"
+        rows = "\n".join(f"{i}. {m}" for i, m in enumerate(self.memories, 1))
+        return f"我记着这些（说「忘掉备忘 2」可以删）：\n{rows}"
 
     # ---- 安静模式 / 免打扰时段 ----
     def _is_quiet_now(self):

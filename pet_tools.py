@@ -1455,6 +1455,44 @@ def in_quiet_hours(now_hm, start, end):
     return cur >= s or cur < e
 
 
+
+# =====================================================================
+# 6.7 长期记忆（"记住 我周四有例会"）
+# =====================================================================
+MEMORY_ADD_WORDS = ("记住", "记一下", "帮我记住", "记下来", "记着")
+MEMORY_LIST_WORDS = ("我的备忘", "你记得什么", "记住什么了", "备忘录", "还记得什么", "你知道我什么")
+MEMORY_FORGET_WORDS = ("忘掉", "忘记", "别记了", "删掉备忘", "清空备忘", "清除备忘", "别记得")
+MEMORY_LIMIT = 30
+
+
+def parse_memory_request(text):
+    """
+    解析长期记忆指令，返回 dict 或 None：
+      {"action": "add", "text": ...}   {"action": "list"}
+      {"action": "forget", "index"/"text": ...}   {"action": "clear"}
+    """
+    if not text:
+        return None
+    t = text.strip()
+    if any(w in t for w in MEMORY_LIST_WORDS):
+        return {"action": "list"}
+    if any(w in t for w in MEMORY_FORGET_WORDS):
+        if any(w in t for w in ("清空", "全部", "所有")):
+            return {"action": "clear"}
+        nums = re.findall(r"\d{1,2}", t)
+        if nums:
+            return {"action": "forget", "index": int(nums[0])}
+        m = re.search(r"(?:忘掉|忘记|别记了|删掉备忘|别记得)\s*[：: ]?\s*(.{1,40})$", t)
+        return {"action": "forget", "text": (m.group(1).strip() if m else "")}
+    if any(w in t for w in MEMORY_ADD_WORDS):
+        m = re.search(r"(?:帮我记住|记住|记一下|记下来|记着)\s*[：:，,]?\s*(.{2,60})$", t)
+        if m:
+            body = m.group(1).strip().strip("。！! ")
+            if len(body) >= 2:
+                return {"action": "add", "text": body}
+    return None
+
+
 def human_delay(secs):
     """把秒数说成人话：90 -> '1分30秒'"""
     secs = int(secs)

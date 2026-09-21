@@ -508,6 +508,20 @@ check("同时段判断", tools.in_quiet_hours((10, 0), (9, 0), (18, 0)) is True
       and tools.in_quiet_hours((20, 0), (9, 0), (18, 0)) is False)
 check("时段为空则不静音", tools.in_quiet_hours((3, 0), None, None) is False)
 
+# ---------- 长期记忆 ----------
+_m = tools.parse_memory_request
+check("记忆·记住", _m("记住 我周四有例会") == {"action": "add", "text": "我周四有例会"},
+      str(_m("记住 我周四有例会")))
+check("记忆·帮我记住带冒号", (_m("帮我记住：牛奶快没了") or {}).get("text") == "牛奶快没了")
+check("记忆·列表", (_m("我的备忘") or {}).get("action") == "list"
+      and (_m("你记得什么") or {}).get("action") == "list")
+check("记忆·按序号忘掉", _m("忘掉备忘 2") == {"action": "forget", "index": 2}
+      and _m("忘掉 3") == {"action": "forget", "index": 3})
+check("记忆·清空", (_m("清空备忘") or {}).get("action") == "clear"
+      and (_m("忘掉全部备忘") or {}).get("action") == "clear")
+check("记忆·按内容忘掉", (_m("忘掉 周四有例会") or {}).get("text") == "周四有例会")
+check("记忆·不误判", _m("今天天气不错") is None and _m("记着点，别摔了") is None)
+
 print("=" * 46)
 failed = [n for n, ok in results if not ok]
 print(f"PASS {len(results) - len(failed)}/{len(results)}")
