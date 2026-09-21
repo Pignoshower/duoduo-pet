@@ -1283,6 +1283,90 @@ def collect_cleanup_files(spec):
     return out[:MAX_DELETE_BATCH * 5]
 
 
+# =====================================================================
+# 6.5 敏感操作：打开控制台 / 删除指定路径 / 运行命令（一律先确认）
+# =====================================================================
+CONSOLE_ALIASES = (
+    (("管理员", "以管理员", "提权", "admin"), {"shell": "powershell", "admin": True}),
+    (("powershell", "power shell", "命令行"), {"shell": "powershell", "admin": False}),
+    (("控制台", "命令提示符", "cmd", "dos", "终端", "小黑框"), {"shell": "cmd", "admin": False}),
+)
+CONSOLE_WORDS = ("控制台", "命令提示符", "cmd", "powershell", "power shell", "终端", "小黑框",
+                 "命令行", "管理员")
+
+# 这些即使主人确认过也不执行——破坏面太大且不可逆
+DANGEROUS_PATTERNS = (
+    "format ", "diskpart", "shutdown", "mkfs", "cipher /w",
+    "del /f /s", "del /s /q", "rd /s", "rmdir /s", "rm -rf",
+    "reg delete", "reg add hklm", "net user", "net localgroup",
+    "bcdedit", "vssadmin delete", "takeown /f", "icacls /reset",
+    "remove-item -recurse -force c:", "stop-computer", "restart-computer",
+)
+
+
+def command_is_dangerous(cmd):
+    """是否属于"绝对不执行"的破坏性命令。返回 (是否危险, 命中规则)。"""
+    low = (cmd or "").lower().replace("\\", "/")
+    for pat in DANGEROUS_PATTERNS:
+        if pat in low:
+            return True, pat.strip()
+    return False, ""
+
+
+def parse_console_request(text):
+    """解析"打开控制台 / PowerShell / 管理员命令行"。返回 {"shell","admin"} 或 None。"""
+    if not text:
+        return None
+    low = text.lower()
+    if not any(w in low for w in CONSOLE_WORDS):
+        return None
+    if not any(w in low for w in ("打开", "开个", "开一个", "启动", "来一个", "开下", "弹出")):
+        return None
+    for keys, spec in CONSOLE_ALIASES:
+        if any(k in low for k in keys):
+            return dict(spec)
+    return {"shell": "cmd", "admin": False}
+
+
+_PATH_PAT = re.compile(
+    r"""(?:"([^"]+)"|'([^']+)'|([A-Za-z]:\\[^\s，。；;]+|\\\\[^\s，。；;]+|~[\\/][^\s，。；;]+|\.{1,2}[\\/][^\s，。；;]+))""")
+
+
+def parse_path_request(text):
+    """从话里取出显式路径（支持引号、"D:\\..."、"~\\..."、".\\..."）。"""
+    if not text:
+        return []
+    out = []
+    for m in _PATH_PAT.finditer(text):
+        p = next((g for g in m.groups() if g), "").strip().rstrip("。，,;；")
+        if p and p not in out:
+            out.append(p)
+    return out
+
+
+def parse_path_delete_request(text):
+    """"删除 D:\\x\\y.txt"这类指定路径。返回 {"paths": [...]} 或 None。"""
+    if not text or not any(w in text for w in ("删掉", "删除", "删了", "清理掉")):
+        return None
+    paths = parse_path_request(text)
+    if not paths:
+        return None
+    return {"paths": [os.path.expandvars(os.path.expanduser(p)) for p in paths]}
+
+
+def parse_run_request(text):
+    """解析"运行 <命令>"，返回命令字符串或 None。"""
+    if not text:
+        return None
+    m = re.search(r"(?:帮我)?\s*(?:运行|执行|跑一下|跑个)\s*[：: ]?\s*(.{2,200})$", text.strip())
+    if not m:
+        return None
+    cmd = m.group(1).strip().strip("。，")
+    if not cmd or cmd.startswith(("得", "的", "起来")) or "怎么样" in cmd:
+        return None
+    return cmd
+
+
 def human_delay(secs):
     """把秒数说成人话：90 -> '1分30秒'"""
     secs = int(secs)

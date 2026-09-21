@@ -277,8 +277,18 @@ class AIBrain:
         if any(k in low for k in ("换个声音", "换个音色", "换一个声音", "下一个音色", "变声")):
             return None, "next_voice"
 
+        # 敏感操作：打开控制台 / 删除指定路径 / 运行命令（都先确认）
+        cons = tools.parse_console_request(text)
+        if cons:
+            return None, ("console", cons)
+        pdel = tools.parse_path_delete_request(text)
+        if pdel:
+            return None, ("delete_path", pdel)
+        runreq = tools.parse_run_request(text)
+        if runreq:
+            return None, ("run", runreq)
         # 删除 / 清理 / 移动（删除必须先确认，模型不能绕过这条）
-        if any(k in low for k in ("确认删除", "确定删除", "确认删掉", "删吧", "同意删除")):
+        if any(k in low for k in ("确认删除", "确定删除", "确认删掉", "删吧", "同意删除", "确认执行", "确认")):
             return None, "confirm_delete"
         if any(k in low for k in ("取消删除", "不删了", "别删了", "算了别删")):
             return None, "cancel_delete"
@@ -687,6 +697,7 @@ class PetCat(QWidget):
         self._last_tool_result = ""
         self._file_context = None    # 拖进来的文件（后续可追问），见 handle_dropped_files
         self._pending_delete = None  # 等待确认的待删清单（确认后才进回收站）
+        self._pending_sensitive = None  # 等待确认的敏感操作（控制台 / 运行命令）
         self.clip_history = tools.ClipboardHistory(10)
         self._clip_seen = ""         # 上一次看到的剪贴板内容（用于轮询）
 
@@ -1801,7 +1812,12 @@ class PetCat(QWidget):
         elif action == "clip_history":
             self.show_clip_history()
         elif action == "confirm_delete":
-            self.confirm_delete()
+            if self._pending_sensitive:
+                self.confirm_sensitive()
+            else:
+                self.confirm_delete()
+        elif action == "confirm":
+            self.confirm_sensitive()
         elif action == "cancel_delete":
             self.cancel_delete()
         elif action == "status":
@@ -1845,6 +1861,22 @@ class PetCat(QWidget):
             self.cleanup_own_files(args[0] if args else {})
         elif cmd == "move":
             self.move_found(args[0] if args else 1, args[1] if len(args) > 1 else "桌面")
+        elif cmd == "console":
+            spec = args[0] if args else {"shell": "cmd", "admin": False}
+            what = "管理员 PowerShell" if spec.get("admin") else (
+                "PowerShell 命令行" if spec.get("shell") == "powershell" else "命令提示符 cmd")
+            self.ask_sensitive("console", spec, f"要打开{what}吗？")
+        elif cmd == "delete_path":
+            self.delete_paths((args[0] or {}).get("paths", []))
+        elif cmd == "run":
+            cmdline = args[0] if args else ""
+            bad, pat = tools.command_is_dangerous(cmdline)
+            if bad:
+                # 破坏性命令连"要不要执行"都不问，直接拒——不可逆的事不给确认机会
+                app_health.log(f"拒绝危险命令（命中 {pat}）：{cmdline}", level=40)
+                self.speak(f"这条我不敢跑：命中「{pat}」，动静太大啦喵", 7000, mood="alert")
+            else:
+                self.ask_sensitive("run", cmdline, f"要执行这条命令吗？\n· {cmdline}")
         elif cmd == "open_found":
             which = args[0] if args else 1
             app = args[1] if len(args) > 1 else None
@@ -2057,6 +2089,79 @@ class PetCat(QWidget):
         return self.brain.llm.ask_async(
             f"{modes[mode]}：\n\n{text[:1200]}", self.cat_name, self.affection,
             lambda t, a, tl, mo=None: self.llm_reply.emit(t, a or "", tl, mo or ""))
+
+    # ---- 敏感操作：统一确认闸门（打开控制台 / 删除指定路径 / 运行命令）----
+    def ask_sensitive(self, kind, payload, preview):
+        """把"将要发生什么"说清楚，等主人确认；确认前一律不动手。"""
+        self._pending_sensitive = {"kind": kind, "payload": payload}
+        return self.speak(f"{preview}\n\n确认就说「确认」，反悔说「取消」", 16000, mood="alert")
+
+    def confirm_sensitive(self):
+        """执行待确认的敏感操作。"""
+        op = getattr(self, "_pending_sensitive", None)
+        if not op:
+            return self.speak("喵？我没有等着办的事呀", 4000)
+        self._pending_sensitive = None
+        kind, payload = op["kind"], op["payload"]
+        if kind == "console":
+            return self.launch_console(payload)
+        if kind == "run":
+            return self.run_command(payload)
+        if kind == "delete":
+            self._pending_delete = payload
+            return self.confirm_delete()
+        return self.speak("这个我还不认识呢", 4000)
+
+    def launch_console(self, spec):
+        """打开控制台窗口（cmd / PowerShell，可要求管理员）。"""
+        shell = (spec or {}).get("shell", "cmd")
+        admin = bool((spec or {}).get("admin"))
+        try:
+            if admin:
+                # 走 UAC：Windows 自己还会弹一次授权框，等于第二道确认
+                subprocess.Popen(["powershell", "-NoProfile", "-Command",
+                                  f"Start-Process {shell} -Verb RunAs"], shell=False)
+            else:
+                exe = "powershell.exe" if shell == "powershell" else "cmd.exe"
+                subprocess.Popen([exe],
+                                 creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+            app_health.log(f"打开{'管理员' if admin else ''}{shell} 控制台")
+            return self.speak("打开啦，主人自己动手吧喵~", 5000, mood="proud")
+        except Exception as e:
+            app_health.log(f"打开控制台失败：{e}", level=40)
+            return self.speak(f"喵…打不开（{e.__class__.__name__}）", 5000)
+
+    def run_command(self, cmd):
+        """跑一条命令并把输出贴进气泡；危险命令即使确认也不跑。"""
+        bad, pat = tools.command_is_dangerous(cmd)
+        if bad:
+            app_health.log(f"拒绝危险命令（命中 {pat}）：{cmd}", level=40)
+            return self.speak(f"这条我不敢跑：命中「{pat}」，动静太大啦喵", 7000, mood="alert")
+        try:
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                               timeout=20, encoding="utf-8", errors="replace")
+            out = ((r.stdout or "").strip() or (r.stderr or "").strip()
+                   or f"（退出码 {r.returncode}，没有输出）")
+        except subprocess.TimeoutExpired:
+            out = "超过 20 秒还没结束，我先停掉了"
+        except Exception as e:
+            out = f"跑不起来：{e.__class__.__name__}"
+        app_health.log(f"执行命令：{cmd} -> {out[:120]}")
+        self.bubble.show_message(f"$ {cmd}\n{out[:600]}", 14000)
+        self.update_ui_positions()
+        return self.speak("跑完了喵~", 5000)
+
+    def delete_paths(self, paths):
+        """删除指定路径（受保护目录依旧拒绝，且必须确认）。"""
+        ok_paths, refused = [], []
+        for p in paths:
+            ok, reason = tools.can_delete(p)
+            (ok_paths if ok else refused).append(p if ok else f"{ai.short_path(p)}（{reason}）")
+        if not ok_paths:
+            return self.speak("喵…这些我都不能删：\n" + "\n".join(refused[:5]), 8000)
+        preview = ("要删掉这些吗？（进回收站，能还原）\n"
+                   + "\n".join(f"· {p}" for p in ok_paths[:tools.MAX_DELETE_BATCH]))
+        return self.ask_sensitive("delete", ok_paths, preview)
 
     # ---- 删除文件（送回收站，可还原）与相关日常操作 ----
     def ask_delete(self, paths):
