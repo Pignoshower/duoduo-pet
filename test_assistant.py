@@ -652,6 +652,7 @@ try:
           f"{amp_before:.4f} -> {pet._breath_amp:.4f}")
 
     # ---- 文件删除：确认门槛、只删自己找到的、取消可撤回 ----
+    import pet_tools as tools            # 用来打桩"送回收站"，测试里绝不真删
     real_recycle = tools.send_to_recycle_bin
     deleted_batches = []
     try:
