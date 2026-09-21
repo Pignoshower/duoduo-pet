@@ -305,6 +305,10 @@ class AIBrain:
             cleanup = tools.parse_cleanup_request(text)
             if cleanup:
                 return None, ("cleanup", cleanup)
+        if (any(k in text for k in ("这个文件", "那个文件", "刚拖的", "拖进来的", "刚才拖"))
+                and any(k in text for k in ("删", "移除", "不要了"))
+                and getattr(self, "_file_context", None)):
+            return None, ("delete_path", {"paths": [self._file_context.get("path")]})
         dele = tools.parse_delete_request(text)
         if dele:
             return None, ("delete", dele)
@@ -443,6 +447,10 @@ class AIBrain:
             if _mems:
                 # 长期记忆：主人让我记住的事，每次提问都带上（说"我的备忘"可查看）
                 ask = "（主人以前让我记住的事：" + "；".join(_mems[:8]) + "）\n\n主人说：" + ask
+            app_health.log("交给大模型处理：" + (text or "")[:40])
+            app_health.log(f"提问发出（{len(ask)} 字，历史 {len(self.llm.history)} 条）")
+            self._llm_t0 = time.time()
+            app_health.log(f"提问发出（{len(ask)} 字，历史 {len(self.llm.history)} 条）")
             self.llm.ask_async(ask, self.pet.cat_name, self.pet.affection,
                                lambda t, a, tool, mood=None: self.pet.llm_reply.emit(t, a or "", tool, mood or ""))
             return None, None, True
@@ -2811,6 +2819,12 @@ def startup_guard():
     except Exception:
         pass
     app_health.setup_logging()
+    try:
+        _me = os.path.join(app_health.app_dir(), "多多.exe" if getattr(sys, "frozen", False) else "多多.py")
+        _st = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(_me)))
+        app_health.log(f"版本时间：{_st}（{os.path.basename(_me)}）—— 和你预期不一致就说明跑的是旧进程")
+    except Exception:
+        pass
     app_health.log("=== 多多启动 ===" + " ".join(sys.argv[1:])
                    + ("（打包版）" if getattr(sys, "frozen", False) else "（源码版）"))
     lock = app_health.SingleInstance("DuoduoPet")

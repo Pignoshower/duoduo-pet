@@ -1288,8 +1288,8 @@ def collect_cleanup_files(spec):
 # =====================================================================
 CONSOLE_ALIASES = (
     (("管理员", "以管理员", "提权", "admin"), {"shell": "powershell", "admin": True}),
-    (("powershell", "power shell", "命令行"), {"shell": "powershell", "admin": False}),
-    (("控制台", "命令提示符", "cmd", "dos", "终端", "小黑框"), {"shell": "cmd", "admin": False}),
+    (("powershell", "power shell"), {"shell": "powershell", "admin": False}),
+    (("控制台", "命令提示符", "cmd", "dos", "终端", "小黑框", "命令行"), {"shell": "cmd", "admin": False}),
 )
 CONSOLE_WORDS = ("控制台", "命令提示符", "cmd", "powershell", "power shell", "终端", "小黑框",
                  "命令行", "管理员")
@@ -1320,7 +1320,11 @@ def parse_console_request(text):
     low = text.lower()
     if not any(w in low for w in CONSOLE_WORDS):
         return None
-    if not any(w in low for w in ("打开", "开个", "开一个", "启动", "来一个", "开下", "弹出")):
+    # 放宽：只要提到控制台类关键词就认（不再强制要求"打开"这个动词），
+    # 因为这些都属于"要不要开"的询问，走的是确认闸门，误认代价很小。
+    if not any(w in low for w in ("打开", "开个", "开一个", "启动", "来一个", "开下", "弹出",
+                                  "给我", "来", "开", "cmd", "控制台", "终端", "命令行",
+                                  "powershell", "命令提示符", "小黑框")):
         return None
     for keys, spec in CONSOLE_ALIASES:
         if any(k in low for k in keys):
@@ -1328,8 +1332,9 @@ def parse_console_request(text):
     return {"shell": "cmd", "admin": False}
 
 
+# 正斜杠也要认：用户很可能写成 D:/x/y.txt
 _PATH_PAT = re.compile(
-    r"""(?:"([^"]+)"|'([^']+)'|([A-Za-z]:\\[^\s，。；;]+|\\\\[^\s，。；;]+|~[\\/][^\s，。；;]+|\.{1,2}[\\/][^\s，。；;]+))""")
+    r"""(?:"([^"]+)"|'([^']+)'|([A-Za-z]:[\\/][^\s，。；;]+|\\\\[^\s，。；;]+|~[\\/][^\s，。；;]+|\.{1,2}[\\/][^\s，。；;]+))""")
 
 
 def parse_path_request(text):
@@ -1350,7 +1355,8 @@ def parse_path_delete_request(text):
     带空格的路径没法靠正则切干净，所以这里用"从锚点往后逐步缩短、取最长的已存在路径"
     的办法补全——`删除 C:\\a\\我的 报告 终稿.docx` 也能认出完整路径。
     """
-    if not text or not any(w in text for w in ("删掉", "删除", "删了", "清理掉")):
+    if not text or not any(w in text for w in ("删掉", "删除", "删了", "清理掉", "移除", "不要了",
+                                                "清理", "清掉", "删除文件", "删掉文件")):
         return None
     cands = []
     for m in _PATH_PAT.finditer(text):

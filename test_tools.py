@@ -522,6 +522,20 @@ check("记忆·清空", (_m("清空备忘") or {}).get("action") == "clear"
 check("记忆·按内容忘掉", (_m("忘掉 周四有例会") or {}).get("text") == "周四有例会")
 check("记忆·不误判", _m("今天天气不错") is None and _m("记着点，别摔了") is None)
 
+# ---------- 路径写法容错 ----------
+_pt = _tempfile.mkdtemp(prefix="duoduo_path2_")
+_pf = os.path.join(_pt, "a.txt")
+with open(_pf, "w", encoding="utf-8") as _f:
+    _f.write("x")
+check("路径·反斜杠", tools.parse_path_delete_request("删除 " + _pf) == {"paths": [_pf]})
+check("路径·正斜杠", tools.parse_path_delete_request("删除 " + _pf.replace("\\", "/")) == {"paths": [_pf]},
+      str(tools.parse_path_delete_request("删除 " + _pf.replace("\\", "/"))))
+check("路径·动词在后", tools.parse_path_delete_request("把 " + _pf + " 删掉") == {"paths": [_pf]},
+      str(tools.parse_path_delete_request("把 " + _pf + " 删掉")))
+check("路径·加引号", tools.parse_path_delete_request('删除 "%s"' % _pf) == {"paths": [_pf]})
+_os.remove(_pf)
+_shutil.rmtree(_pt, ignore_errors=True)
+
 print("=" * 46)
 failed = [n for n, ok in results if not ok]
 print(f"PASS {len(results) - len(failed)}/{len(results)}")
