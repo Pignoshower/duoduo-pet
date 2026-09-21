@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Platform">
   <img src="https://img.shields.io/badge/Python-3.10-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/PyQt6-6.x-41CD52?style=for-the-badge&logo=qt&logoColor=white" alt="PyQt6">
-  <img src="https://img.shields.io/badge/Tests-418%20passed-2EA043?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-438%20passed-2EA043?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests">
 
   <br>
 
@@ -262,8 +262,8 @@ edge-tts 走 aiohttp，不读 Windows 的 IE 代理设置，程序会自己从�
 $env:QT_QPA_PLATFORM="offscreen"
 python selftest.py          # 29：帧资源、动画状态机、转圈首尾一致
 python test_app_smoke.py    # 31：应用级冒烟
-python test_assistant.py    # 185：大模型层（打桩，不联网）、删除与控制台闸门、安静模式
-python test_tools.py        # 173：语音、日程、音量、快照、删除规则、危险命令
+python test_assistant.py    # 198：大模型层（打桩，不联网）、删除与控制台闸门、安静模式
+python test_tools.py        # 180：语音、日程、音量、快照、删除规则、危险命令
 ```
 
 </details>
