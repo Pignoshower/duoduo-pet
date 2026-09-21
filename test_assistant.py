@@ -712,6 +712,8 @@ try:
     _real_say = pet.speaker.say
     try:
         pet.speaker.say = lambda *a, **k: _said.append(a)
+        _real_voice = pet.voice_on
+        pet.voice_on = True                    # 语音开关在测试环境可能是关的，这里显式打开
         pet.set_quiet_mode(True)
         check("安静模式开启", pet.quiet_mode and pet._is_quiet_now())
         pet.speak("安静测试", 2000)
@@ -730,6 +732,7 @@ try:
         check("状态说明含时段", "23:00" in pet.quiet_status_text(), pet.quiet_status_text())
     finally:
         pet.speaker.say = _real_say
+        pet.voice_on = _real_voice
         pet.set_quiet_mode(False)
         pet.quiet_range = None
         pet.pet_data["quiet_range"] = None
