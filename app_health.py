@@ -277,14 +277,15 @@ def fullscreen_active():
             return False
         # 光"盖满显示器"还不够：最大化窗口在某些环境下矩形也等于显示器，
         # 所以再加一条——要么它盖住了任务栏区域（真全屏），要么它是无边框窗口（游戏/视频）。
-        GWL_STYLE, WS_CAPTION, tol = -16, 0x00C00000, 2
-        style = user32.GetWindowLongW(hwnd, GWL_STYLE)
-        has_caption = bool(style & WS_CAPTION)
+        # 判据收紧：必须盖住**任务栏区域**才算全屏。
+        # 之前还允许"无标题栏窗口"，结果 VS Code / Chrome 应用模式这种无边框最大化窗口
+        # 被误判成全屏，小猫会在主人正常干活时自己藏起来——误判比漏判讨厌得多。
+        tol = 2
         over_taskbar = (win.bottom > info.rcWork.bottom + tol
                         or win.top < info.rcWork.top - tol
                         or win.left < info.rcWork.left - tol
                         or win.right > info.rcWork.right + tol)
-        return bool(over_taskbar or not has_caption)
+        return bool(over_taskbar)
     except Exception:
         return False
 
