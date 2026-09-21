@@ -13,8 +13,12 @@ try:
             _d["quiet_range"] = None
             _d["quiet_mode"] = 0
             _j.dump(_d, open("pet_data.json", "w", encoding="utf-8"), ensure_ascii=False)
+    # 全屏避让依赖真实前台窗口，测试里钉成"非全屏"，否则跑测试时猫会自己藏起来
+    import app_health as _ah
+    _ah.fullscreen_active = lambda: False
 except Exception:
     pass
+
 
 import os
 import re
