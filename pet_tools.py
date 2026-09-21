@@ -1375,8 +1375,10 @@ def parse_path_delete_request(text):
             short = next((g for g in m.groups() if g), "").strip().rstrip("。，,;；")
             if short:
                 found = os.path.expandvars(os.path.expanduser(short))
-        if found and found not in cands:
-            cands.append(found)
+        if found:
+            found = os.path.normpath(found)      # 正斜杠统一成系统形式
+            if found not in cands:
+                cands.append(found)
     if not cands:
         return None
     return {"paths": cands}

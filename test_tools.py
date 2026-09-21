@@ -458,10 +458,12 @@ check("控制台·管理员提权",
       all((tools.parse_console_request(x) or {}).get("admin") is True
           for x in ("以管理员打开命令行", "用管理员身份打开控制台", "打开管理员终端")),
       str(tools.parse_console_request("以管理员打开命令行")))
-check("控制台·不误判",
+check("控制台·不误判（不相关的话不会开窗口）",
       tools.parse_console_request("打开 bilibili") is None
-      and tools.parse_console_request("控制台是什么东西") is None
-      and tools.parse_console_request("我最喜欢控制台了") is None)
+      and tools.parse_console_request("今天天气不错") is None)
+check("控制台·放宽后口语也认（会先问你确认）",
+      all((tools.parse_console_request(x) or {}).get("shell") == "cmd"
+          for x in ("cmd", "控制台", "命令行", "给我一个终端", "开cmd")))
 
 check("危险命令·format", tools.command_is_dangerous("format d:")[0] is True)
 check("危险命令·del /s /q", tools.command_is_dangerous("del /s /q C:\\")[0] is True)
@@ -528,7 +530,8 @@ _pf = os.path.join(_pt, "a.txt")
 with open(_pf, "w", encoding="utf-8") as _f:
     _f.write("x")
 check("路径·反斜杠", tools.parse_path_delete_request("删除 " + _pf) == {"paths": [_pf]})
-check("路径·正斜杠", tools.parse_path_delete_request("删除 " + _pf.replace("\\", "/")) == {"paths": [_pf]},
+check("路径·正斜杠（统一成系统形式）",
+      tools.parse_path_delete_request("删除 " + _pf.replace("\\", "/")) == {"paths": [_pf]},
       str(tools.parse_path_delete_request("删除 " + _pf.replace("\\", "/"))))
 check("路径·动词在后", tools.parse_path_delete_request("把 " + _pf + " 删掉") == {"paths": [_pf]},
       str(tools.parse_path_delete_request("把 " + _pf + " 删掉")))
