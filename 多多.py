@@ -2204,8 +2204,11 @@ class PetCat(QWidget):
         return self.speak(msg, 7000, mood="happy")
 
     def cancel_delete(self):
+        # 取消要把所有待确认的东西一起清掉（删除清单 + 敏感操作），
+        # 否则"取消"之后那句"要打开控制台吗"还挂着，下次说"确认"就真开了
         self._pending_delete = None
-        return self.speak("好，那我不删啦", 3500)
+        self._pending_sensitive = None
+        return self.speak("好，那我不动啦", 3500)
 
     def delete_from_found(self, spec):
         """从"最近找到的文件"里挑出待删清单（只删多多自己找出来的）。"""
