@@ -1459,7 +1459,7 @@ def in_quiet_hours(now_hm, start, end):
 # =====================================================================
 # 6.7 长期记忆（"记住 我周四有例会"）
 # =====================================================================
-MEMORY_ADD_WORDS = ("记住", "记一下", "帮我记住", "记下来", "记着")
+MEMORY_ADD_WORDS = ("记住", "记一下", "帮我记住", "记下来")   # "记着"太松，会误判"记着点，别摔了"
 MEMORY_LIST_WORDS = ("我的备忘", "你记得什么", "记住什么了", "备忘录", "还记得什么", "你知道我什么")
 MEMORY_FORGET_WORDS = ("忘掉", "忘记", "别记了", "删掉备忘", "清空备忘", "清除备忘", "别记得")
 MEMORY_LIMIT = 30
@@ -1485,7 +1485,7 @@ def parse_memory_request(text):
         m = re.search(r"(?:忘掉|忘记|别记了|删掉备忘|别记得)\s*[：: ]?\s*(.{1,40})$", t)
         return {"action": "forget", "text": (m.group(1).strip() if m else "")}
     if any(w in t for w in MEMORY_ADD_WORDS):
-        m = re.search(r"(?:帮我记住|记住|记一下|记下来|记着)\s*[：:，,]?\s*(.{2,60})$", t)
+        m = re.search(r"(?:帮我记住|记住|记一下|记下来)\s*[：:，,]?\s*(.{2,60})$", t)
         if m:
             body = m.group(1).strip().strip("。！! ")
             if len(body) >= 2:

@@ -742,7 +742,7 @@ try:
     pet.brain.llm.__dict__.pop("chat", None)
     pet.brain.llm.cfg["api_key"] = ""
     pet._do_command("memory", {"action": "forget", "index": 1})
-    check("按序号忘掉", len(pet.memories) == 1 and "牛奶" in pet.memories[0], str(pet.memories))
+    check("按序号忘掉", len(pet.memories) == 1 and "周四" in pet.memories[0], str(pet.memories))
     pet._do_command("memory", {"action": "clear"})
     check("清空备忘", pet.memories == [] and pet.pet_data.get("memories") == [])
 
