@@ -14,6 +14,7 @@ pet_tools.py —— 桌宠的"系统能力"工具层（不依赖 PyQt，便于�
 3. parse_reminder()：把"25分钟后提醒我喝水"解析成 (秒数, 事项)
    支持 秒/分钟/小时，以及"番茄钟"（默认 25 分钟）。
 """
+import ctypes
 import json
 import os
 import queue as _queue
@@ -1136,6 +1137,150 @@ def parse_clipboard_item(text):
             action = act
             break
     return (idx, action)
+
+
+# =====================================================================
+# 6. 文件删除（送进回收站，可还原）与保护规则
+# =====================================================================
+MAX_DELETE_BATCH = 20        # 一次最多删多少个，防"全删了"式误操作
+
+
+def protected_roots():
+    """系统目录 + 多多自己的程序目录，一律不碰。"""
+    roots = []
+    for var in ("SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData", "windir"):
+        v = os.environ.get(var)
+        if v:
+            roots.append(os.path.abspath(v))
+    try:
+        import app_health
+        roots.append(app_health.app_dir())      # 程序目录（含素材、配置、存档）
+    except Exception:
+        pass
+    return [r for r in roots if r]
+
+
+def is_protected(path):
+    """路径是否落在禁止删除的范围内。"""
+    try:
+        p = os.path.abspath(path)
+    except Exception:
+        return True
+    for root in protected_roots():
+        try:
+            if os.path.commonpath([p, root]) == root:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def can_delete(path):
+    """返回 (能否删, 原因)。只允许删存在的普通文件。"""
+    if not path or not os.path.exists(path):
+        return False, "文件不存在"
+    if os.path.isdir(path):
+        return False, "这是文件夹，我不删文件夹"
+    if is_protected(path):
+        return False, "它在系统目录或我的程序目录里，太危险了"
+    return True, ""
+
+
+class _SHFILEOPSTRUCTW(ctypes.Structure):
+    _fields_ = [("hwnd", ctypes.c_void_p), ("wFunc", ctypes.c_uint),
+                ("pFrom", ctypes.c_wchar_p), ("pTo", ctypes.c_wchar_p),
+                ("fFlags", ctypes.c_uint16), ("fAnyOperationsAborted", ctypes.c_int),
+                ("hNameMappings", ctypes.c_void_p), ("lpszProgressTitle", ctypes.c_wchar_p)]
+
+
+def send_to_recycle_bin(paths, dry_run=False):
+    """
+    把文件送进**回收站**（可还原，不是永久删除）。返回 (成功数, 失败说明)。
+    接口失败时抛异常由调用方提示，绝不退化成 os.remove。
+    """
+    paths = [os.path.abspath(p) for p in (paths or [])]
+    if not paths:
+        return 0, ["没有要删的文件"]
+    if dry_run:
+        return len(paths), []
+    if os.name != "nt":
+        raise RuntimeError("只有 Windows 支持送回收站")
+    FO_DELETE = 3
+    FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_SILENT, FOF_NOERRORUI = 0x40, 0x10, 0x4, 0x400
+    op = _SHFILEOPSTRUCTW(None, FO_DELETE, "\0".join(paths) + "\0\0", None,
+                          FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI,
+                          0, None, None)
+    ret = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+    failed = [] if ret == 0 else [f"资源管理器返回错误码 {ret}"]
+    if op.fAnyOperationsAborted:
+        failed.append("操作被中断")
+    done = len([p for p in paths if not os.path.exists(p)])
+    return done, failed
+
+
+def parse_delete_request(text):
+    """
+    解析删除意图，返回 {"targets": [序号...], "all": bool} 或 None。
+      "删掉第2个" / "删除第1个和第3个" / "把找到的都删了"
+    序号指"多多最近找出来的文件"，不接受任意路径——安全底线。
+    """
+    if not text:
+        return None
+    t = text.strip()
+    if not any(w in t for w in ("删掉", "删除", "删了", "清理掉")):
+        return None
+    if any(w in t for w in ("都删", "全删", "全部删", "都清理", "全清理", "都删掉")):
+        return {"targets": [], "all": True}
+    idxs = []
+    for mm in re.finditer(r"第\s*([0-9]+|[一二三四五六七八九十]{1,3})\s*(?:个|条)", t):
+        tok = mm.group(1)
+        n = int(tok) if tok.isdigit() else _cn_to_int(tok)
+        if n and n not in idxs:
+            idxs.append(n)
+    if not idxs:
+        m = re.search(r"(?:删掉|删除|删了)\s*([0-9]+)(?:\s*个)?", t)
+        if m:
+            idxs.append(int(m.group(1)))
+    if not idxs:
+        return None
+    return {"targets": idxs[:MAX_DELETE_BATCH], "all": False}
+
+
+CLEANUP_TARGETS = {
+    # 关键词 → (目录, 文件名通配, 说明)；只清多多自己生成、带专属前缀的文件
+    "截图": ("~/Desktop", "多多截图_*.png", "多多截的图"),
+    "剪贴板": ("~/Desktop", "剪贴板_*.txt", "从剪贴板存下来的文本"),
+    "语音缓存": ("%TEMP%/duoduo_tts", "*", "语音合成的临时缓存"),
+}
+
+
+def parse_cleanup_request(text):
+    """解析"清理多多自己产生的东西"（截图 / 剪贴板文本 / 语音缓存）。"""
+    if not text or not any(w in text for w in ("清理", "清除", "打扫", "清掉")):
+        return None
+    for key, (folder, pattern, desc) in CLEANUP_TARGETS.items():
+        if key in text:
+            return {"key": key, "folder": folder, "pattern": pattern, "desc": desc}
+    if any(w in text for w in ("垃圾", "临时文件", "你的东西", "你自己")):
+        return {"key": "语音缓存", "folder": "%TEMP%/duoduo_tts", "pattern": "*",
+                "desc": "语音合成的临时缓存"}
+    return None
+
+
+def collect_cleanup_files(spec):
+    """按清理规则列出实际存在的文件（绝对路径）。"""
+    import fnmatch
+    folder = os.path.expandvars(os.path.expanduser(spec["folder"]))
+    if not os.path.isdir(folder):
+        return []
+    out = []
+    for name in sorted(os.listdir(folder)):
+        if spec["pattern"] != "*" and not fnmatch.fnmatch(name, spec["pattern"]):
+            continue
+        p = os.path.join(folder, name)
+        if os.path.isfile(p):
+            out.append(p)
+    return out[:MAX_DELETE_BATCH * 5]
 
 
 def human_delay(secs):

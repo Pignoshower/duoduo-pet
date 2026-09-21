@@ -277,6 +277,23 @@ class AIBrain:
         if any(k in low for k in ("换个声音", "换个音色", "换一个声音", "下一个音色", "变声")):
             return None, "next_voice"
 
+        # 删除 / 清理 / 移动（删除必须先确认，模型不能绕过这条）
+        if any(k in low for k in ("确认删除", "确定删除", "确认删掉", "删吧", "同意删除")):
+            return None, "confirm_delete"
+        if any(k in low for k in ("取消删除", "不删了", "别删了", "算了别删")):
+            return None, "cancel_delete"
+        if not tools.parse_delete_request(text):
+            cleanup = tools.parse_cleanup_request(text)
+            if cleanup:
+                return None, ("cleanup", cleanup)
+        dele = tools.parse_delete_request(text)
+        if dele:
+            return None, ("delete", dele)
+        mv = re.search(r"把?\s*第\s*([0-9一二三四五六七八九十]{1,3})\s*(?:个|条)?\s*(?:文件)?\s*"
+                       r"(?:移动|搬|挪)\s*(?:到|去)?\s*([^\s，。]{1,6})", text)
+        if mv:
+            num = int(mv.group(1)) if mv.group(1).isdigit() else tools._cn_to_int(mv.group(1))
+            return None, ("move", num or 1, mv.group(2).strip())
         # 剪贴板历史里的第 N 条（要放在"打开第 N 个"之前，否则会被抢走）
         _clip_item = tools.parse_clipboard_item(text)
         if _clip_item and any(k in low for k in ("翻译", "总结", "摘要", "概括", "解释", "润色",
@@ -669,6 +686,7 @@ class PetCat(QWidget):
         self._tool_rounds = 0        # 大模型工具链轮数（限制 1 轮追加）
         self._last_tool_result = ""
         self._file_context = None    # 拖进来的文件（后续可追问），见 handle_dropped_files
+        self._pending_delete = None  # 等待确认的待删清单（确认后才进回收站）
         self.clip_history = tools.ClipboardHistory(10)
         self._clip_seen = ""         # 上一次看到的剪贴板内容（用于轮询）
 
@@ -1782,6 +1800,10 @@ class PetCat(QWidget):
             self.speak(self.clipboard_save(), 6000)
         elif action == "clip_history":
             self.show_clip_history()
+        elif action == "confirm_delete":
+            self.confirm_delete()
+        elif action == "cancel_delete":
+            self.cancel_delete()
         elif action == "status":
             if self.system_status_reply() is None:
                 self.speak("喵~ 我看看…", 2000)
@@ -1817,6 +1839,12 @@ class PetCat(QWidget):
             self.clipboard_ai(args[0] if args else "summary")
         elif cmd == "clip_item":
             self.use_clip_item(args[0] if args else 1, args[1] if len(args) > 1 else "translate")
+        elif cmd == "delete":
+            self.delete_from_found(args[0] if args else {})
+        elif cmd == "cleanup":
+            self.cleanup_own_files(args[0] if args else {})
+        elif cmd == "move":
+            self.move_found(args[0] if args else 1, args[1] if len(args) > 1 else "桌面")
         elif cmd == "open_found":
             which = args[0] if args else 1
             app = args[1] if len(args) > 1 else None
@@ -2029,6 +2057,92 @@ class PetCat(QWidget):
         return self.brain.llm.ask_async(
             f"{modes[mode]}：\n\n{text[:1200]}", self.cat_name, self.affection,
             lambda t, a, tl, mo=None: self.llm_reply.emit(t, a or "", tl, mo or ""))
+
+    # ---- 删除文件（送回收站，可还原）与相关日常操作 ----
+    def ask_delete(self, paths):
+        """把待删清单摆出来等确认；不确认绝不执行。"""
+        files, refused = [], []
+        for p in paths:
+            ok, reason = tools.can_delete(p)
+            if ok:
+                files.append(p)
+            else:
+                refused.append(f"{ai.short_path(p)}（{reason}）")
+        if not files:
+            return self.speak("喵…这些我都不能删：\n" + "\n".join(refused[:5]), 8000)
+        files = files[:tools.MAX_DELETE_BATCH]
+        self._pending_delete = files
+        listing = "\n".join(f"· {ai.short_path(p)}" for p in files)
+        tail = "\n确认就说「确认删除」，反悔说「取消」"
+        if refused:
+            tail += f"\n另有 {len(refused)} 个我没动：{refused[0]}"
+        return self.speak(f"要删掉这 {len(files)} 个文件吗？（进回收站，能还原）\n{listing}{tail}",
+                          14000, mood="alert")
+
+    def confirm_delete(self):
+        """执行待确认的删除；走回收站，不永久删除。"""
+        files = getattr(self, "_pending_delete", None)
+        if not files:
+            return self.speak("喵？我没有待删的东西呀", 4000)
+        self._pending_delete = None
+        try:
+            done, failed = tools.send_to_recycle_bin(files)
+        except Exception as e:
+            app_health.log(f"送回收站失败：{e}", level=40)
+            return self.speak(f"喵…删不掉（{e.__class__.__name__}）", 5000)
+        app_health.log(f"删除 {done} 个文件到回收站：{files[:5]}")
+        self._last_found = [p for p in getattr(self, "_last_found", []) if os.path.exists(p)]
+        self._save_now()
+        msg = f"好啦，{done} 个文件进回收站了（误删可以去回收站还原）"
+        if failed:
+            msg += "\n有没删掉的：" + "；".join(failed[:2])
+        return self.speak(msg, 7000, mood="happy")
+
+    def cancel_delete(self):
+        self._pending_delete = None
+        return self.speak("好，那我不删啦", 3500)
+
+    def delete_from_found(self, spec):
+        """从"最近找到的文件"里挑出待删清单（只删多多自己找出来的）。"""
+        found = [p for p in getattr(self, "_last_found", []) if os.path.exists(p)]
+        if not found:
+            return self.speak("喵？先跟我说“找文件 XXX”，我才知道要删哪个呀", 5000)
+        if spec.get("all"):
+            return self.ask_delete(found)
+        picked = [found[n - 1] for n in spec.get("targets", []) if 1 <= n <= len(found)]
+        if not picked:
+            listing = "\n".join(f"{i+1}. {ai.short_path(p)}" for i, p in enumerate(found))
+            return self.speak(f"喵…我只记了 {len(found)} 个，主人要删哪个？\n{listing}", 9000)
+        return self.ask_delete(picked)
+
+    def cleanup_own_files(self, spec):
+        """清理多多自己产生的文件（截图 / 剪贴板文本 / 语音缓存）。"""
+        files = tools.collect_cleanup_files(spec)
+        if not files:
+            return self.speak(f"没有可清理的{spec['desc']}，很干净喵~", 5000)
+        self.speak(f"找到 {len(files)} 个{spec['desc']}", 4000)
+        return self.ask_delete(files)
+
+    MOVE_DESTS = {"桌面": "~/Desktop", "文档": "~/Documents", "下载": "~/Downloads",
+                  "图片": "~/Pictures", "临时目录": "%TEMP%"}
+
+    def move_found(self, index, dest_key):
+        """把最近找到的第 N 个移动到指定目录（文件还在，不是删除）。"""
+        found = [p for p in getattr(self, "_last_found", []) if os.path.exists(p)]
+        if not (1 <= index <= len(found)):
+            return self.speak(f"喵…没有第 {index} 个（我只记了 {len(found)} 个）", 5000)
+        dest = os.path.expandvars(os.path.expanduser(self.MOVE_DESTS.get(dest_key, dest_key)))
+        if not os.path.isdir(dest):
+            return self.speak(f"找不到「{dest_key}」这个位置呢", 5000)
+        src = found[index - 1]
+        try:
+            target = shutil.move(src, dest)
+            self._last_found[index - 1] = target
+            self._save_now()
+            app_health.log(f"移动文件：{src} -> {target}")
+            return self.speak(f"搬好啦：{ai.short_path(target)}", 6000)
+        except Exception as e:
+            return self.speak(f"喵…搬不动（{e.__class__.__name__}）", 5000)
 
     # ---- 看家 / 专注模式 ----
     def _focus_tick(self):

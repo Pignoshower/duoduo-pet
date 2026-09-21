@@ -1,55 +1,79 @@
-# 多多 · 桌面宠物猫
+<div align="center">
+  <img src="docs/preview.png" width="240" alt="多多">
+  <h1>多多 · 桌面宠物猫</h1>
+  <p>Windows 桌面上的 Q 版暹罗猫。会自己走动、发呆、打哈欠、踩奶、扑镜头，<br>
+  也能聊天、找文件、翻译剪贴板、报系统状态。</p>
+  <p>
+    <img alt="platform" src="https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white">
+    <img alt="python" src="https://img.shields.io/badge/Python-3.10-3776AB?logo=python&logoColor=white">
+    <img alt="pyqt" src="https://img.shields.io/badge/PyQt6-6.x-41CD52?logo=qt&logoColor=white">
+    <img alt="llm" src="https://img.shields.io/badge/LLM-OpenAI%20%E5%85%BC%E5%AE%B9-4B5563">
+    <img alt="tests" src="https://img.shields.io/badge/tests-344%20passed-2EA043">
+  </p>
+</div>
 
-![预览](docs/preview.png)
+---
 
-一只住在 Windows 桌面上的 Q 版暹罗猫。会自己走动、发呆、打哈欠、踩奶、扑镜头，能聊天、开网页、找文件、翻译剪贴板、报系统状态。PyQt6 编写，大模型走任意 OpenAI 兼容接口。
+## 三步跑起来
 
-![动作](docs/actions.png)
+1. 到 [Releases](../../releases) 下载 **`duoduo.exe`** 与 **`frames_opt.zip`**
+2. 解压到**同一个文件夹**（`duoduo.exe` 与 `frames_opt/` 并列）
+3. 双击 `duoduo.exe`
 
-（发呆、吃东西、打哈欠、踩奶，素材原帧）
+首次运行会自动生成 `config.json`，填上 `api_key`（任意 OpenAI 兼容接口，默认 DeepSeek）重启就能聊天；不填也能用，只是不会闲聊。
 
-![动图](docs/preview.gif)
+> exe 未做代码签名，Windows SmartScreen 首次可能拦一下，点「更多信息 → 仍要运行」。它由仓库里的 `build_exe.py` 打包，可以自己重新构建。
+> 素材约 70MB，没有放进仓库；启动时若 `frames_opt/` 缺失，程序会弹说明框告诉你缺什么、去哪里取。
 
-（发呆 → 走路 → 吃东西 → 打哈欠）
-
-## 运行前先准备素材
-
-动画素材 `frames_opt/`（452 张 PNG，约 70MB）没有放进仓库。克隆之后：
-
-到 [Releases](../../releases) 下载 `frames_opt.zip`，解压到项目根目录（与 `多多.py` 同级）。解压正确的标志是能看到 `frames_opt/meta.json` 与 `frames_opt/idle/`、`frames_opt/walk/` 等子目录。
-
-启动时若素材缺失，程序会弹出说明框指出缺什么、去哪里取，而不是报一句看不懂的错误。
-
-不想装 Python：到 [Releases](../../releases) 把 `duoduo.exe` 与 `frames_opt.zip` 一起下载，解压到**同一个文件夹**（`duoduo.exe` 与 `frames_opt/` 并列），双击 exe 即可；首次运行会自动生成 `config.json`，填上 api_key 后重启就能聊天。exe 未做代码签名，Windows SmartScreen 可能拦一下，点「更多信息 → 仍要运行」。它由仓库里的 `build_exe.py` 打包（本地构建出来的文件名是 `多多.exe`，与发布包里的 `duoduo.exe` 是同一个东西），可以自己重新构建。
-
-## 安装与启动
+<details>
+<summary>想从源码运行</summary>
 
 ```powershell
+git clone https://github.com/Pignoshower/duoduo-pet
+cd duoduo-pet
+# 先准备素材：下载 Release 里的 frames_opt.zip 解压到此处
 pip install PyQt6
-pip install edge-tts          # 可选，神经网络语音，需要联网
-copy config.example.json config.json     # 填上自己的 api_key
+pip install edge-tts          # 可选，神经网络语音，需联网
+copy config.example.json config.json
 python 多多.py
 ```
 
-打包成单文件 exe：`python build_exe.py --clean`，产物 `多多.exe` 约 40MB，双击启动。exe 只打包代码，运行时读同目录的 `frames_opt/`、`config.json`、`pet_data.json`，换素材和改配置都不必重新打包。
+打包：`python build_exe.py --clean`
 
-全局热键：`Ctrl+Alt+D` 聊天、`Ctrl+Alt+C` 翻译剪贴板、`Ctrl+Alt+Z` 总结剪贴板。同一时刻只允许一只猫运行，重复启动会把已有那只叫到前台。
+</details>
 
-## 桌面上的行为
+---
 
-| 操作 | 结果 |
-|---|---|
-| 左键拖拽 | 拎起小猫，松手后靠边 40px 内吸附屏幕边缘 |
-| 双击 | 抚摸，好感度 +1，冒爱心 |
-| 拖文件到猫身上 | 文本类读内容并总结要点，之后可直接追问；文件夹列出条目；音频交给系统播放 |
-| 点击气泡里的文件名 | 用默认程序打开；后面的「📂」打开所在文件夹，「记事本」「其它程序…」换程序打开 |
-| 右键 | 四组菜单：互动（喂食/摸摸/散步/站立/睡觉/叫醒）、剪贴板、工具（截图/系统状态/音量/最近找到的文件）、设置 |
+## 它会做什么
 
-发呆时会随机眨眼（2.5~6.5 秒一次，偶尔连眨两下），呼吸的幅度与周期每周期随机换一次并偶尔加深。这两项由代码控制，不占用素材。
+<div align="center">
+  <img src="docs/actions.png" width="820" alt="发呆 / 吃东西 / 打哈欠 / 踩奶">
+  <br><sub>发呆 · 吃东西 · 打哈欠 · 踩奶（素材原帧）</sub>
+</div>
 
-## 聊天能说什么
+**桌面上的行为**
 
-本地识别、不联网即可用的指令：
+- 左键拖拽拎起来，松手后靠边 40px 内吸附屏幕边缘；甩太快会晕
+- 双击摸摸，好感度 +1，冒爱心
+- 发呆时随机眨眼（2.5~6.5 秒一次，偶尔连眨两下）；呼吸的幅度与周期每轮随机换，偶尔深吸一口气。这两项由代码控制，不占素材
+- 玩全屏游戏或看视频时自动躲起来，退出全屏自己回来；主人手动藏起来的不会被强行拉出
+- 同一时刻只允许一只猫，重复启动会把已有那只叫到前台
+
+**把文件拖到它身上**：文本类（txt / md / py / json / csv / log…）读内容并总结要点，之后可以直接追问细节；文件夹列出条目；音频交给系统播放。说 `忘掉这个文件` 清掉上下文。
+
+**右键菜单**分四组：🐾 互动 · 📋 剪贴板 · 🔧 工具 · ⚙️ 设置。
+
+<div align="center">
+  <img src="docs/preview.gif" width="300" alt="发呆 → 走路 → 吃东西 → 打哈欠">
+  <br><sub>发呆 → 走路 → 吃东西 → 打哈欠</sub>
+</div>
+
+---
+
+## 能跟它说什么
+
+<details open>
+<summary><b>常用指令</b></summary>
 
 | 说法 | 结果 |
 |---|---|
@@ -58,24 +82,54 @@ python 多多.py
 | `每天18:30叫我下班` | 每天定点提醒 |
 | `每周一9点提醒我开例会` / `每周一三五 8点 提醒我锻炼` / `工作日9点提醒我打卡` | 每周或工作日提醒 |
 | `明天9点叫我起床` / `今晚8点提醒我看剧` | 定点一次性提醒 |
-| `声音大一点` / `静音` | 系统音量 |
-| `截个屏` | 截图存到桌面 |
-| `念一下剪贴板` / `把剪贴板存下来` | 朗读剪贴板或存成桌面 txt |
-| `剪贴板历史` / `用第2条翻译` | 列出最近复制的 10 条，对其中某一条做翻译、总结、解释、润色、帮回复 |
-| `系统状态` | 电量、内存、CPU、联网状态 |
-| `找文件 pet_data` → `打开第1个` | 找文件，用默认程序打开 |
+| `找文件 pet_data` → `打开第1个` | 找文件并用默认程序打开 |
 | `用记事本打开第1个` / `换个方式打开第1个` | 指定程序打开，或弹出 Windows 的「打开方式」选择框 |
-| `开启语音` / `试听一下` / `情绪演示` | 语音播报开关、试听音色、依次念八种情绪 |
-| `开启看家模式` | 离开 5 分钟去睡、回来打招呼、连续用电脑 50 分钟提醒休息 |
-| `开启全屏避让` / `打开开机自启` | 全屏应用时自动隐藏；开机自启 |
+| `声音大一点` / `静音` / `截个屏` / `系统状态` | 音量、截图存桌面、电量内存 CPU 网络 |
+| `剪贴板历史` / `用第2条翻译` | 最近复制的 10 条，对其中某一条做翻译、总结、解释、润色、帮回复 |
+| `开启看家模式` / `开启全屏避让` / `打开开机自启` | 离开自动去睡、久坐提醒休息；全屏时隐藏；开机自启 |
+| `试听一下` / `情绪演示` | 试听音色、依次念八种情绪 |
 
-没命中这些说法时，问题会交给大模型，同时带上当前时间与好感度。模型可以在回复末尾附 `[action: eat]` 让小猫做动作，或 `[tool: open bilibili]`、`[tool: volume down]`、`[tool: clipboard summary]` 让小猫执行工具（白名单，未知工具忽略）。工具执行完会把结果回喂给模型再问一轮，因此「帮我找找 pet_data 然后打开它」可以一次说完。
+</details>
+
+<details>
+<summary><b>文件整理：删除、清理、移动</b>（删除一律进回收站，可还原）</summary>
+
+| 说法 | 结果 |
+|---|---|
+| `删掉第2个` / `删除第1个和第3个` | 列出待删清单，等你确认 |
+| `把找到的都删了` | 最近找到的全部列入清单（仍需确认） |
+| `确认删除` / `取消` | 执行（进回收站）/ 放弃 |
+| `清理一下你的截图` | 清 `桌面/多多截图_*.png`，只清它自己截的 |
+| `清理剪贴板文本` | 清 `桌面/剪贴板_*.txt` |
+| `清空语音缓存` | 清 `%TEMP%\duoduo_tts` |
+| `把第1个移动到桌面` | 移动到桌面 / 文档 / 下载 / 图片 / 临时目录，文件不会丢 |
+
+几条写在代码里的硬约束：
+
+- **只删它自己找出来的文件**（先 `找文件 XXX`，再说 `删掉第2个`），不接受任意路径；大模型也没有删除工具，无法自作主张
+- **必须二次确认**：说 `删掉第2个` 只会列出清单，确认前一个字节都不动
+- **送回收站**（`SHFileOperation` + `FOF_ALLOWUNDO`），不是永久删除
+- **系统目录与程序目录一律拒删**（`C:\Windows`、`Program Files`、`ProgramData`，以及多多自己的目录，避免误删素材与存档）
+- 只删文件不删文件夹；单次上限 20 个；每次删除都记进 `%TEMP%\duoduo.log`
+
+</details>
+
+<details>
+<summary><b>没命中指令的话，交给大模型</b></summary>
+
+问题会带上当前时间与好感度发给模型。模型可以在回复末尾附 `[action: eat]` 让小猫做动作，或 `[tool: open bilibili]`、`[tool: volume down]`、`[tool: clipboard summary]` 让它执行工具（白名单，未知工具忽略）。工具执行完会把结果回喂给模型再问一轮，所以「帮我找找 pet_data 然后打开它」可以一次说完。
+
+</details>
+
+---
 
 ## 语音
 
-引擎按可用性依次尝试：edge 神经语音 → Windows OneCore → SAPI → PowerShell。默认音色是 edge 的晓伊，OneCore 走系统装机音色（瑶瑶、慧慧）。八种情绪（开心、兴奋、撒娇、困倦、提醒、得意、委屈、平常）通过语速与音调实现，同一句话按当前状态换语气。
+引擎按可用性依次尝试：**edge 神经语音 → Windows OneCore → SAPI → PowerShell**。默认音色是 edge 的晓伊，OneCore 用系统装机音色（瑶瑶、慧慧）。八种情绪（开心、兴奋、撒娇、困倦、提醒、得意、委屈、平常）通过语速与音调实现，同一句话按当前状态换语气。
 
-edge-tts 走 aiohttp，不读 Windows 的 IE 代理设置，程序会自己从注册表取代理传给它：实测同一个端点直连约 11 秒、走代理约 1.2 秒，代理失效时退回直连。
+edge-tts 走 aiohttp，不读 Windows 的 IE 代理设置，程序会自己从注册表取代理传给它：实测同一端点直连约 11 秒、走代理约 1.2 秒；代理失效时退回直连。
+
+---
 
 ## 工程
 
@@ -83,23 +137,25 @@ edge-tts 走 aiohttp，不读 Windows 的 IE 代理设置，程序会自己从�
 |---|---|
 | `多多.py` | 窗口、绘制、动画状态机、行为、本地意图、工具派发 |
 | `ai_assistant.py` | 大模型客户端、提示词、动作/工具/情绪标签解析、站点与文件查找 |
-| `pet_tools.py` | 语音（多引擎 + 情绪）、日程解析、系统状态、音量、剪贴板历史 |
+| `pet_tools.py` | 语音（多引擎 + 情绪）、日程解析、系统状态、音量、剪贴板历史、回收站删除 |
 | `app_health.py` | 日志、单实例锁、开机自启、配置自检、空闲检测、全屏检测 |
-| `pipeline.py`、`snapshot.py` | 素材流水线与快照回退；仅在你要自己改素材时用到 |
 | `build_exe.py` | PyInstaller 打包，图标由素材首帧生成 |
+| `pipeline.py`、`snapshot.py` | 素材流水线与快照回退，只在你要自己改素材时用到 |
 | `使用说明.md` | 全部指令、配置项与排错表 |
-| `docs/` | README 用的预览图与动图 |
+| `docs/` | 上面的预览图与动图 |
 
-## 测试
+**测试**（离屏运行，不需要显示器）：
 
 ```powershell
 $env:QT_QPA_PLATFORM="offscreen"
 python selftest.py          # 29：帧资源、动画状态机、转圈首尾一致
 python test_app_smoke.py    # 31：应用级冒烟
 python test_assistant.py    # 158：大模型层（打桩，不联网）与集成
-python test_tools.py        # 126：语音、日程、音量、快照、流水线
+python test_tools.py        # 126：语音、日程、音量、快照、删除规则
 ```
 
-## 素材来源
+---
 
-角色形象由 AI 生成视频经抠图、对齐、修帧得到。请勿直接商用。
+<div align="center">
+<sub>角色形象由 AI 生成视频经抠图、对齐、修帧得到。请勿直接商用。</sub>
+</div>
