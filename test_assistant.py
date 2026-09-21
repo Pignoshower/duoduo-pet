@@ -707,6 +707,46 @@ try:
         pet._pending_delete = None
         pet._last_found = []
 
+    # ---- 敏感操作闸门：开控制台 / 运行命令（打桩，不真开窗口不真跑）----
+    box = []
+    _real_launch, _real_run = pet.launch_console, pet.run_command
+    try:
+        pet.launch_console = lambda s: box.append(("console", s)) or "ok"
+        pet.run_command = lambda c: box.append(("run", c)) or "ok"
+        pet._pending_sensitive = None
+        r = pet.brain._handle_local("打开控制台")
+        check("控制台指令被识别", r[1] == ("console", {"shell": "cmd", "admin": False}), str(r))
+        pet._do_command("console", r[1][1])
+        check("确认前不开窗口", not box and pet._pending_sensitive is not None, str(box))
+        check("气泡说明了要开什么", "命令提示符" in pet.bubble.label.text(), pet.bubble.label.text()[:30])
+        pet._do_action("confirm_delete")
+        check("确认后才开窗口", box == [("console", {"shell": "cmd", "admin": False})], str(box))
+
+        pet._pending_sensitive = None
+        box.clear()
+        r = pet.brain._handle_local("运行 ipconfig /all")
+        check("运行指令被识别", r[1] == ("run", "ipconfig /all"), str(r))
+        pet._do_command("run", r[1][1])
+        check("运行也要先确认", not box and pet._pending_sensitive is not None)
+        pet._do_action("confirm_delete")
+        check("确认后才执行", box == [("run", "ipconfig /all")], str(box))
+
+        pet._pending_sensitive = None
+        box.clear()
+        pet._do_command("run", "format d:")
+        check("危险命令当场拒绝（连问都不问）",
+              not box and pet._pending_sensitive is None and "不敢跑" in pet.bubble.label.text(),
+              pet.bubble.label.text()[:26])
+
+        pet._pending_sensitive = None
+        box.clear()
+        pet._do_command("console", {"shell": "powershell", "admin": True})
+        pet._do_action("cancel_delete")
+        check("取消后不开窗口", not box and pet._pending_sensitive is None)
+    finally:
+        pet.launch_console, pet.run_command = _real_launch, _real_run
+        pet._pending_sensitive = None
+
     # ---- 右键菜单与全局热键（新入口可发现性）----
     def _all_labels(menu):
         """把菜单连同子菜单里的所有文字摊平，便于断言。"""

@@ -1345,13 +1345,35 @@ def parse_path_request(text):
 
 
 def parse_path_delete_request(text):
-    """"删除 D:\\x\\y.txt"这类指定路径。返回 {"paths": [...]} 或 None。"""
+    """"删除 D:\\x\\y.txt"这类指定路径。返回 {"paths": [...]} 或 None。
+
+    带空格的路径没法靠正则切干净，所以这里用"从锚点往后逐步缩短、取最长的已存在路径"
+    的办法补全——`删除 C:\\a\\我的 报告 终稿.docx` 也能认出完整路径。
+    """
     if not text or not any(w in text for w in ("删掉", "删除", "删了", "清理掉")):
         return None
-    paths = parse_path_request(text)
-    if not paths:
+    cands = []
+    for m in _PATH_PAT.finditer(text):
+        raw = text[m.start():m.start() + 300].split("\n")[0]
+        found = None
+        for cut in range(len(raw), 1, -1):
+            cand = raw[:cut].strip().rstrip("。，,;；")
+            if not cand:
+                continue
+            full = os.path.expandvars(os.path.expanduser(cand))
+            if os.path.exists(full):
+                found = full
+                break
+        if found is None:
+            # 都不存在：退回到正则截出来的那一段，让 can_delete 回"文件不存在"
+            short = next((g for g in m.groups() if g), "").strip().rstrip("。，,;；")
+            if short:
+                found = os.path.expandvars(os.path.expanduser(short))
+        if found and found not in cands:
+            cands.append(found)
+    if not cands:
         return None
-    return {"paths": [os.path.expandvars(os.path.expanduser(p)) for p in paths]}
+    return {"paths": cands}
 
 
 def parse_run_request(text):

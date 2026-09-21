@@ -428,6 +428,54 @@ check("清理遇到不存在的目录返回空",
 os.remove(_tmpfile)
 _shutil.rmtree(_clean_dir, ignore_errors=True)
 
+# ---------- 敏感操作：控制台 / 路径删除 / 危险命令 ----------
+check("控制台·cmd", tools.parse_console_request("打开控制台") == {"shell": "cmd", "admin": False},
+      str(tools.parse_console_request("打开控制台")))
+check("控制台·别名",
+      all((tools.parse_console_request(x) or {}).get("shell") == "cmd"
+          for x in ("打开命令提示符", "打开终端", "打开小黑框", "打开cmd", "打开 CMD")),
+      str(tools.parse_console_request("打开命令提示符")))
+check("控制台·PowerShell",
+      (tools.parse_console_request("打开 PowerShell") or {}).get("shell") == "powershell"
+      and (tools.parse_console_request("开一个 powershell") or {}).get("shell") == "powershell")
+check("控制台·管理员提权",
+      all((tools.parse_console_request(x) or {}).get("admin") is True
+          for x in ("以管理员打开命令行", "用管理员身份打开控制台", "打开管理员终端")),
+      str(tools.parse_console_request("以管理员打开命令行")))
+check("控制台·不误判",
+      tools.parse_console_request("打开 bilibili") is None
+      and tools.parse_console_request("控制台是什么东西") is None
+      and tools.parse_console_request("我最喜欢控制台了") is None)
+
+check("危险命令·format", tools.command_is_dangerous("format d:")[0] is True)
+check("危险命令·del /s /q", tools.command_is_dangerous("del /s /q C:\\")[0] is True)
+check("危险命令·rm -rf", tools.command_is_dangerous("rm -rf /")[0] is True)
+check("危险命令·关机分区注册表",
+      tools.command_is_dangerous("shutdown -s -t 0")[0] is True
+      and tools.command_is_dangerous("diskpart")[0] is True
+      and tools.command_is_dangerous("reg delete HKLM\\Software")[0] is True)
+check("危险命令·普通命令放行",
+      tools.command_is_dangerous("ipconfig /all")[0] is False
+      and tools.command_is_dangerous("dir")[0] is False
+      and tools.command_is_dangerous("ping baidu.com")[0] is False)
+
+_pdir = _tempfile.mkdtemp(prefix="duoduo_pathtest_")
+_p_sp = os.path.join(_pdir, "带 空格 的.txt")
+with open(_p_sp, "w", encoding="utf-8") as _f:
+    _f.write("x")
+check("路径删除·未加引号带空格", tools.parse_path_delete_request("删除 " + _p_sp) == {"paths": [_p_sp]},
+      str(tools.parse_path_delete_request("删除 " + _p_sp)))
+check("路径删除·加引号", tools.parse_path_delete_request('删除 "%s"' % _p_sp) == {"paths": [_p_sp]})
+check("路径删除·无路径不触发", tools.parse_path_delete_request("删除第2个") is None)
+check("路径删除·无删除词不触发", tools.parse_path_delete_request("打开 " + _p_sp) is None)
+_os.remove(_p_sp)
+_shutil.rmtree(_pdir, ignore_errors=True)
+
+check("运行解析", tools.parse_run_request("运行 ipconfig /all") == "ipconfig /all"
+      and tools.parse_run_request("帮我执行 dir") == "dir",
+      str(tools.parse_run_request("运行 ipconfig /all")))
+check("运行解析·不误判闲聊", tools.parse_run_request("你运行得很好") is None)
+
 print("=" * 46)
 failed = [n for n, ok in results if not ok]
 print(f"PASS {len(results) - len(failed)}/{len(results)}")
