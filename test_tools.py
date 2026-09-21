@@ -539,6 +539,17 @@ check("路径·加引号", tools.parse_path_delete_request('删除 "%s"' % _pf) 
 _os.remove(_pf)
 _shutil.rmtree(_pt, ignore_errors=True)
 
+# ---------- 按描述删除（"删掉桌面上那张图"）----------
+_dd = tools.parse_describe_delete_request
+check("描述删除·桌面那张图", _dd("删掉桌面上那张图") == "桌面上那张图", str(_dd("删掉桌面上那张图")))
+check("描述删除·动词在后", _dd("把桌面那张微信图片删掉") == "桌面那张微信图片")
+check("描述删除·有路径时让路", _dd("删除 D:\\test\\a.txt") is None)
+check("描述删除·有序号时让路", _dd("删掉第2个") is None)
+check("描述删除·不是删除就不认", _dd("打开记事本") is None and _dd("今天天气不错") is None)
+check("描述删除·猜目录", [os.path.basename(d) for d in tools.guess_dirs("桌面那张图")] == ["Desktop"])
+check("描述删除·按类型过滤", tools.guess_type_filter("桌面那张图") == (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif"))
+check("描述删除·候选查找不报错", isinstance(tools.guess_delete_candidates("绝对不存在的名字xyz"), list))
+
 print("=" * 46)
 failed = [n for n, ok in results if not ok]
 print(f"PASS {len(results) - len(failed)}/{len(results)}")

@@ -309,6 +309,9 @@ class AIBrain:
                 and any(k in text for k in ("删", "移除", "不要了"))
                 and getattr(self, "_file_context", None)):
             return None, ("delete_path", {"paths": [self._file_context.get("path")]})
+        dscr = tools.parse_describe_delete_request(text)
+        if dscr:
+            return None, ("delete_guess", dscr)
         dele = tools.parse_delete_request(text)
         if dele:
             return None, ("delete", dele)
@@ -1948,6 +1951,8 @@ class PetCat(QWidget):
             what = "管理员 PowerShell" if spec.get("admin") else (
                 "PowerShell 命令行" if spec.get("shell") == "powershell" else "命令提示符 cmd")
             self.ask_sensitive("console", spec, f"要打开{what}吗？")
+        elif cmd == "delete_guess":
+            self.delete_by_description(args[0] if args else "")
         elif cmd == "delete_path":
             self.delete_paths((args[0] or {}).get("paths", []))
         elif cmd == "run":
@@ -2314,6 +2319,15 @@ class PetCat(QWidget):
         self.bubble.show_message(f"$ {cmd}\n{out[:600]}", 14000)
         self.update_ui_positions()
         return self.speak("跑完了喵~", 5000)
+
+    def delete_by_description(self, desc):
+        """按描述找候选文件，列出来等主人确认（确认前不动手）。"""
+        cands = tools.guess_delete_candidates(desc)
+        if not cands:
+            return self.speak(f"喵…桌面/下载里没找到和「{desc}」有关的文件；"
+                              f"可以说具体文件名，或者说「找文件 {desc}」我再看看", 9000)
+        self.speak(f"按「{desc}」找到 {len(cands)} 个，我先列出来", 4000)
+        return self.ask_delete(cands)
 
     def delete_paths(self, paths):
         """删除指定路径（受保护目录依旧拒绝，且必须确认）。"""

@@ -1501,6 +1501,90 @@ def parse_memory_request(text):
     return None
 
 
+
+# "删除 <描述>"：既不是路径也不是"第 N 个"，交给上层按描述去找候选
+DELETE_DESC_VERBS = ("删掉", "删除", "删了", "移除", "清理掉", "清掉", "不要了")
+
+
+def parse_describe_delete_request(text):
+    """返回描述字符串（例如"桌面那张图"）或 None。"""
+    if not text:
+        return None
+    t = text.strip()
+    if not any(w in t for w in DELETE_DESC_VERBS):
+        return None
+    if _PATH_PAT.search(t):
+        return None
+    if re.search(r"第\s*[0-9一二三四五六七八九十]{1,3}\s*(?:个|条)", t):
+        return None
+    body = t
+    for w in DELETE_DESC_VERBS:
+        body = body.replace(w, " ")
+    body = re.sub(r"(帮我|给我|把|请|一下|吧|呢|哦|喵|文件|那个|这个)", " ", body)
+    body = body.strip(" ，。！？,.!?的：:")
+    return body or None
+
+
+TYPE_HINTS = (
+    (("图", "照片", "图片", "截图", "image", "photo", "png", "jpg"),
+     (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif")),
+    (("视频", "影片", "录像", "video", "mp4"), (".mp4", ".mkv", ".avi", ".mov")),
+    (("音乐", "音频", "歌曲", "audio", "mp3"), (".mp3", ".wav", ".flac", ".m4a")),
+    (("文档", "表格", "doc", "pdf", "word", "excel"),
+     (".doc", ".docx", ".pdf", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".md")),
+)
+
+
+def guess_dirs(desc):
+    """按描述猜去哪几个目录找。"""
+    home = os.path.expanduser("~")
+    dirs = []
+    for key, folder in (("桌面", "Desktop"), ("下载", "Downloads"), ("文档", "Documents"),
+                        ("图片", "Pictures"), ("音乐", "Music"), ("视频", "Videos")):
+        if key in desc:
+            dirs.append(os.path.join(home, folder))
+    if not dirs:
+        dirs = [os.path.join(home, "Desktop"), os.path.join(home, "Downloads")]
+    return [d for d in dirs if os.path.isdir(d)]
+
+
+def guess_type_filter(desc):
+    low = desc.lower()
+    for keys, exts in TYPE_HINTS:
+        if any(k in low for k in keys):
+            return exts
+    return None
+
+
+def guess_delete_candidates(desc, limit=12):
+    """按描述在常见目录里找候选文件（新的在前）。"""
+    if not desc:
+        return []
+    desc_low = desc.lower()
+    tokens = [tk for tk in re.split(r"[\s，。、,._\-]+", desc_low) if len(tk) >= 2]
+    exts = guess_type_filter(desc_low)
+    hits = []
+    for folder in guess_dirs(desc):
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for name in names:
+            full = os.path.join(folder, name)
+            if not os.path.isfile(full):
+                continue
+            low = name.lower()
+            by_name = any(tk in low for tk in tokens) if tokens else False
+            by_ext = bool(exts) and low.endswith(exts)
+            if by_name or by_ext:
+                try:
+                    hits.append((os.path.getmtime(full), full))
+                except OSError:
+                    pass
+    hits.sort(reverse=True)
+    return [f for _m, f in hits[:limit]]
+
+
 def human_delay(secs):
     """把秒数说成人话：90 -> '1分30秒'"""
     secs = int(secs)
