@@ -1,5 +1,17 @@
 # -*- coding: utf-8 -*-
 """test_assistant.py —— ai_assistant 纯函数单测 + 多多.py 集成冒烟测试（离屏）"""
+# --- 测试环境归一化：不让存档里的免打扰时段影响断言（深夜跑测试时曾被静音）---
+try:
+    import json as _j, os as _o
+    if _o.path.exists("pet_data.json"):
+        _d = _j.load(open("pet_data.json", encoding="utf-8"))
+        if _d.get("quiet_range"):
+            _d["quiet_range"] = None
+            _d["quiet_mode"] = 0
+            _j.dump(_d, open("pet_data.json", "w", encoding="utf-8"), ensure_ascii=False)
+except Exception:
+    pass
+
 import os
 import sys
 import re
