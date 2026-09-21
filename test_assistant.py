@@ -651,6 +651,61 @@ try:
           0.004 <= pet._breath_amp <= 0.03 and pet.breathe_phase < 2 * math.pi,
           f"{amp_before:.4f} -> {pet._breath_amp:.4f}")
 
+    # ---- 文件删除：确认门槛、只删自己找到的、取消可撤回 ----
+    real_recycle = tools.send_to_recycle_bin
+    deleted_batches = []
+    try:
+        def _fake_recycle(paths, dry_run=False):
+            deleted_batches.append(list(paths))
+            return len(paths), []
+
+        tools.send_to_recycle_bin = _fake_recycle
+        dd = tempfile.mkdtemp()
+        f1 = os.path.join(dd, "甲.txt")
+        f2 = os.path.join(dd, "乙.txt")
+        for p in (f1, f2):
+            with open(p, "w", encoding="utf-8") as fp:
+                fp.write("x")
+        pet._last_found = [f1, f2]
+        pet._pending_delete = None
+
+        r = pet.brain._handle_local("删掉第1个")
+        check("删除要走确认流程", r[1] == ("delete", {"targets": [1], "all": False}), str(r))
+        pet.delete_from_found(r[1][1])
+        check("确认前一个字节都不动", not deleted_batches and os.path.exists(f1), str(deleted_batches))
+        check("待删清单已记录", pet._pending_delete == [f1], str(pet._pending_delete))
+        check("气泡列出待删文件并等确认",
+              "确认" in pet.bubble.label.text() and "甲.txt" in pet.bubble.label.text(),
+              pet.bubble.label.text()[:50])
+
+        pet._do_action("cancel_delete")
+        check("取消后清单清空且不删", pet._pending_delete is None and not deleted_batches)
+
+        pet.delete_from_found({"targets": [1], "all": False})
+        pet._do_action("confirm_delete")
+        check("确认后才真正删除", deleted_batches == [[f1]], str(deleted_batches))
+        check("只删指定的那一个", os.path.exists(f2) is True)
+        check("删完提示可还原", "回收站" in pet.bubble.label.text(), pet.bubble.label.text()[:40])
+
+        pet._pending_delete = None
+        pet._last_found = [os.path.join(os.getcwd(), "多多.py")]
+        pet.delete_from_found({"targets": [1], "all": False})
+        check("程序目录里的文件拒删",
+              pet._pending_delete is None and "不能删" in pet.bubble.label.text(),
+              pet.bubble.label.text()[:40])
+
+        pet._last_found = []
+        pet.delete_from_found({"targets": [1], "all": False})
+        check("没找过文件就提示先找", "找文件" in pet.bubble.label.text(), pet.bubble.label.text()[:30])
+        pet._last_found = [f2]
+        pet.move_found(9, "桌面")
+        check("移动序号越界给提示", "没有第" in pet.bubble.label.text(), pet.bubble.label.text()[:20])
+        shutil.rmtree(dd, ignore_errors=True)
+    finally:
+        tools.send_to_recycle_bin = real_recycle
+        pet._pending_delete = None
+        pet._last_found = []
+
     # ---- 右键菜单与全局热键（新入口可发现性）----
     def _all_labels(menu):
         """把菜单连同子菜单里的所有文字摊平，便于断言。"""

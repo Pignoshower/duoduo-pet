@@ -1256,7 +1256,7 @@ CLEANUP_TARGETS = {
 
 def parse_cleanup_request(text):
     """解析"清理多多自己产生的东西"（截图 / 剪贴板文本 / 语音缓存）。"""
-    if not text or not any(w in text for w in ("清理", "清除", "打扫", "清掉")):
+    if not text or not any(w in text for w in ("清理", "清除", "清空", "打扫", "清掉")):
         return None
     for key, (folder, pattern, desc) in CLEANUP_TARGETS.items():
         if key in text:

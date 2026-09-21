@@ -1,32 +1,54 @@
 <div align="center">
-  <img src="docs/preview.png" width="240" alt="多多">
-  <h1>多多 · 桌面宠物猫</h1>
-  <p>Windows 桌面上的 Q 版暹罗猫。会自己走动、发呆、打哈欠、踩奶、扑镜头，<br>
-  也能聊天、找文件、翻译剪贴板、报系统状态。</p>
-  <p>
-    <img alt="platform" src="https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white">
-    <img alt="python" src="https://img.shields.io/badge/Python-3.10-3776AB?logo=python&logoColor=white">
-    <img alt="pyqt" src="https://img.shields.io/badge/PyQt6-6.x-41CD52?logo=qt&logoColor=white">
-    <img alt="llm" src="https://img.shields.io/badge/LLM-OpenAI%20%E5%85%BC%E5%AE%B9-4B5563">
-    <img alt="tests" src="https://img.shields.io/badge/tests-344%20passed-2EA043">
-  </p>
+  <img src="docs/preview.png" width="170" alt="多多">
+
+  # 🐱 多多 · 桌面宠物猫
+
+  **Windows 桌面上的 Q 版暹罗猫**<br>
+  会自己走动、发呆、打哈欠、踩奶、扑镜头，也能聊天、找文件、翻译剪贴板、报系统状态
+
+  <br>
+
+  <a href="../../releases/latest"><img src="https://img.shields.io/badge/Download-duoduo.exe-2EA043?style=for-the-badge&logo=windows&logoColor=white" alt="Download exe"></a>
+  <a href="../../releases/latest"><img src="https://img.shields.io/badge/Download-frames__opt.zip-1F6FEB?style=for-the-badge&logo=files&logoColor=white" alt="Download assets"></a>
+  <a href="使用说明.md"><img src="https://img.shields.io/badge/Read-使用说明-8957E5?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Docs"></a>
+
+  <br>
+
+  <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Platform">
+  <img src="https://img.shields.io/badge/Python-3.10-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/PyQt6-6.x-41CD52?style=for-the-badge&logo=qt&logoColor=white" alt="PyQt6">
+  <img src="https://img.shields.io/badge/LLM-OpenAI%20兼容-4B5563?style=for-the-badge" alt="LLM">
+  <img src="https://img.shields.io/badge/Tests-344%20passed-2EA043?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests">
+
+  <br>
+
+  <img src="https://img.shields.io/badge/语言-中文-DE3A3A?style=for-the-badge" alt="中文">
+  <img src="https://img.shields.io/badge/动作-10%20个%20%2F%20452%20帧-FB8C00?style=for-the-badge" alt="Actions">
+  <img src="https://img.shields.io/badge/情绪语音-8%20种-EC6CB9?style=for-the-badge" alt="Moods">
 </div>
+
+<br>
 
 ---
 
-## 三步跑起来
+<div align="center">
 
-1. 到 [Releases](../../releases) 下载 **`duoduo.exe`** 与 **`frames_opt.zip`**
-2. 解压到**同一个文件夹**（`duoduo.exe` 与 `frames_opt/` 并列）
-3. 双击 `duoduo.exe`
+### 🚀 三步跑起来
+
+| ① 下载 | ② 解压到同一个文件夹 | ③ 双击 |
+|:---:|:---:|:---:|
+| `duoduo.exe`<br>`frames_opt.zip` | `duoduo.exe` 与 `frames_opt/` 并列 | 运行 `duoduo.exe` |
+
+</div>
 
 首次运行会自动生成 `config.json`，填上 `api_key`（任意 OpenAI 兼容接口，默认 DeepSeek）重启就能聊天；不填也能用，只是不会闲聊。
 
-> exe 未做代码签名，Windows SmartScreen 首次可能拦一下，点「更多信息 → 仍要运行」。它由仓库里的 `build_exe.py` 打包，可以自己重新构建。
-> 素材约 70MB，没有放进仓库；启动时若 `frames_opt/` 缺失，程序会弹说明框告诉你缺什么、去哪里取。
+> **exe 未做代码签名**，Windows SmartScreen 首次可能拦一下，点「更多信息 → 仍要运行」。它由仓库里的 `build_exe.py` 打包，可自行重新构建。
+>
+> **素材约 70MB**，没有放进仓库；启动时若 `frames_opt/` 缺失，程序会弹说明框告诉你缺什么、去哪里取。
 
 <details>
-<summary>想从源码运行</summary>
+<summary><b>⌨️ 想从源码运行</b></summary>
 
 ```powershell
 git clone https://github.com/Pignoshower/duoduo-pet
@@ -44,24 +66,35 @@ python 多多.py
 
 ---
 
-## 它会做什么
+## 📰 更新
+
+- `[2026.09]` 🗑️ 新增**文件整理**：删除（进回收站、可还原）、批量删除、清理自己的截图与剪贴板文本、移动文件——删除必须二次确认，且只删它自己找出来的文件
+- `[2026.09]` 👀 **程序化眨眼与随机呼吸**：自动定位眼睛位置，发呆时随机眨眼；呼吸幅度与周期每轮随机，偶尔深吸一口气
+- `[2026.09]` ⏰ **日程自然语言化**：`每天18:30叫我下班`、`每周一9点提醒我开例会`、`工作日9点打卡`，到点气泡 + 语音 + 托盘通知三重提醒，重复日程自动续期
+- `[2026.09]` 🖥️ **全屏避让**：玩全屏游戏或看视频时自动躲起来，退出全屏自己回来
+- `[2026.09]` 📋 **剪贴板历史**：记住最近 10 条，`用第2条翻译` 直接对某一条做处理（只存内存）
+- `[2026.09]` 📦 v1.0 发布：单文件 exe + 452 帧素材包，clone 后三步可跑
+
+---
+
+## ✨ 它会做什么
 
 <div align="center">
-  <img src="docs/actions.png" width="820" alt="发呆 / 吃东西 / 打哈欠 / 踩奶">
+  <img src="docs/actions.png" width="760" alt="发呆 / 吃东西 / 打哈欠 / 踩奶">
   <br><sub>发呆 · 吃东西 · 打哈欠 · 踩奶（素材原帧）</sub>
 </div>
 
-**桌面上的行为**
+**🐾 桌面上的行为**
 
 - 左键拖拽拎起来，松手后靠边 40px 内吸附屏幕边缘；甩太快会晕
 - 双击摸摸，好感度 +1，冒爱心
-- 发呆时随机眨眼（2.5~6.5 秒一次，偶尔连眨两下）；呼吸的幅度与周期每轮随机换，偶尔深吸一口气。这两项由代码控制，不占素材
+- 发呆时随机眨眼（2.5~6.5 秒一次，偶尔连眨两下）；呼吸幅度与周期每轮随机，偶尔深吸一口气 —— 这两项由代码控制，不占素材
 - 玩全屏游戏或看视频时自动躲起来，退出全屏自己回来；主人手动藏起来的不会被强行拉出
 - 同一时刻只允许一只猫，重复启动会把已有那只叫到前台
 
-**把文件拖到它身上**：文本类（txt / md / py / json / csv / log…）读内容并总结要点，之后可以直接追问细节；文件夹列出条目；音频交给系统播放。说 `忘掉这个文件` 清掉上下文。
+**📂 把文件拖到它身上**：文本类（txt / md / py / json / csv / log…）读内容并总结要点，之后可以直接追问细节；文件夹列出条目；音频交给系统播放。说 `忘掉这个文件` 清掉上下文。
 
-**右键菜单**分四组：🐾 互动 · 📋 剪贴板 · 🔧 工具 · ⚙️ 设置。
+**🖱 右键菜单**分四组：🐾 互动 · 📋 剪贴板 · 🔧 工具 · ⚙️ 设置。
 
 <div align="center">
   <img src="docs/preview.gif" width="300" alt="发呆 → 走路 → 吃东西 → 打哈欠">
@@ -70,10 +103,12 @@ python 多多.py
 
 ---
 
-## 能跟它说什么
+## 💬 能跟它说什么
 
 <details open>
 <summary><b>常用指令</b></summary>
+
+<br>
 
 | 说法 | 结果 |
 |---|---|
@@ -91,8 +126,9 @@ python 多多.py
 
 </details>
 
-<details>
-<summary><b>文件整理：删除、清理、移动</b>（删除一律进回收站，可还原）</summary>
+---
+
+## 🗂 文件整理（删除的都进回收站，可还原）
 
 | 说法 | 结果 |
 |---|---|
@@ -104,26 +140,31 @@ python 多多.py
 | `清空语音缓存` | 清 `%TEMP%\duoduo_tts` |
 | `把第1个移动到桌面` | 移动到桌面 / 文档 / 下载 / 图片 / 临时目录，文件不会丢 |
 
-几条写在代码里的硬约束：
+<div align="center">
+  <img src="https://img.shields.io/badge/⚠️_第一条-只删它自己找出来的文件-D1242F?style=for-the-badge" alt="只删自己找到的">
+  <img src="https://img.shields.io/badge/⚠️_第二条-确认前一个字节都不动-D1242F?style=for-the-badge" alt="必须确认">
+  <img src="https://img.shields.io/badge/⚠️_第三条-回收站可还原-2EA043?style=for-the-badge" alt="回收站">
+</div>
 
-- **只删它自己找出来的文件**（先 `找文件 XXX`，再说 `删掉第2个`），不接受任意路径；大模型也没有删除工具，无法自作主张
+<br>
+
+写在代码里的硬约束：
+
+- **只删它自己找出来的文件**（先 `找文件 XXX`，再说 `删掉第2个`），不接受任意路径；**大模型没有删除工具**，无法自作主张
 - **必须二次确认**：说 `删掉第2个` 只会列出清单，确认前一个字节都不动
 - **送回收站**（`SHFileOperation` + `FOF_ALLOWUNDO`），不是永久删除
 - **系统目录与程序目录一律拒删**（`C:\Windows`、`Program Files`、`ProgramData`，以及多多自己的目录，避免误删素材与存档）
 - 只删文件不删文件夹；单次上限 20 个；每次删除都记进 `%TEMP%\duoduo.log`
 
-</details>
+---
 
-<details>
-<summary><b>没命中指令的话，交给大模型</b></summary>
+## 🔧 没命中指令的话，交给大模型
 
 问题会带上当前时间与好感度发给模型。模型可以在回复末尾附 `[action: eat]` 让小猫做动作，或 `[tool: open bilibili]`、`[tool: volume down]`、`[tool: clipboard summary]` 让它执行工具（白名单，未知工具忽略）。工具执行完会把结果回喂给模型再问一轮，所以「帮我找找 pet_data 然后打开它」可以一次说完。
 
-</details>
-
 ---
 
-## 语音
+## 🔊 语音
 
 引擎按可用性依次尝试：**edge 神经语音 → Windows OneCore → SAPI → PowerShell**。默认音色是 edge 的晓伊，OneCore 用系统装机音色（瑶瑶、慧慧）。八种情绪（开心、兴奋、撒娇、困倦、提醒、得意、委屈、平常）通过语速与音调实现，同一句话按当前状态换语气。
 
@@ -131,7 +172,7 @@ edge-tts 走 aiohttp，不读 Windows 的 IE 代理设置，程序会自己从�
 
 ---
 
-## 工程
+## 🧰 工程
 
 | 文件 | 内容 |
 |---|---|
@@ -144,7 +185,10 @@ edge-tts 走 aiohttp，不读 Windows 的 IE 代理设置，程序会自己从�
 | `使用说明.md` | 全部指令、配置项与排错表 |
 | `docs/` | 上面的预览图与动图 |
 
-**测试**（离屏运行，不需要显示器）：
+<details>
+<summary><b>✅ 测试（离屏运行，不需要显示器）</b></summary>
+
+<br>
 
 ```powershell
 $env:QT_QPA_PLATFORM="offscreen"
@@ -153,6 +197,8 @@ python test_app_smoke.py    # 31：应用级冒烟
 python test_assistant.py    # 158：大模型层（打桩，不联网）与集成
 python test_tools.py        # 126：语音、日程、音量、快照、删除规则
 ```
+
+</details>
 
 ---
 

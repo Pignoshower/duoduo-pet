@@ -384,6 +384,50 @@ check("历史条目解析·第十二条念一下", tools.parse_clipboard_item("�
 check("历史条目解析·默认动作", tools.parse_clipboard_item("第4条") == (4, "translate"))
 check("历史条目解析·不误判", tools.parse_clipboard_item("这条件不错") is None)
 
+# ---------- 文件删除：解析、保护规则、回收站（一律 dry_run，不真删）----------
+check("删除解析·第2个", tools.parse_delete_request("删掉第2个") == {"targets": [2], "all": False},
+      str(tools.parse_delete_request("删掉第2个")))
+check("删除解析·多个序号", tools.parse_delete_request("删除第1个和第3个") == {"targets": [1, 3], "all": False},
+      str(tools.parse_delete_request("删除第1个和第3个")))
+check("删除解析·中文序号", tools.parse_delete_request("删掉第三个") == {"targets": [3], "all": False},
+      str(tools.parse_delete_request("删掉第三个")))
+check("删除解析·全部", tools.parse_delete_request("把找到的都删了") == {"targets": [], "all": True},
+      str(tools.parse_delete_request("把找到的都删了")))
+check("删除解析·不误判普通句子", tools.parse_delete_request("这文件不错") is None)
+check("删除解析·无删除词不触发", tools.parse_delete_request("第2个文件在哪") is None)
+
+check("保护规则·程序目录拒删", tools.is_protected(os.getcwd()) is True)
+check("保护规则·系统目录拒删", tools.is_protected(os.environ.get("SystemRoot", "C:\\Windows")) is True)
+_tmpfile = os.path.join(_tempfile.gettempdir(), "duoduo_del_test.txt")
+with open(_tmpfile, "w", encoding="utf-8") as _f:
+    _f.write("x")
+check("保护规则·普通文件可删", tools.can_delete(_tmpfile) == (True, ""))
+check("保护规则·文件夹拒绝", tools.can_delete(_tempfile.gettempdir())[0] is False)
+check("保护规则·不存在的文件拒绝", tools.can_delete(_tmpfile + ".nope")[0] is False)
+check("protected_roots 非空", len(tools.protected_roots()) >= 2, str(tools.protected_roots()[:2]))
+check("dry_run 不真删", tools.send_to_recycle_bin([_tmpfile], dry_run=True) == (1, [])
+      and os.path.exists(_tmpfile))
+check("空清单不报错", tools.send_to_recycle_bin([], dry_run=True) == (0, ["没有要删的文件"]))
+check("批量上限存在", tools.MAX_DELETE_BATCH >= 5, str(tools.MAX_DELETE_BATCH))
+
+# 清理规则：只挑多多自己生成的文件
+check("清理解析·截图", (tools.parse_cleanup_request("清理一下你的截图") or {}).get("pattern") == "多多截图_*.png")
+check("清理解析·剪贴板", (tools.parse_cleanup_request("清理剪贴板文本") or {}).get("pattern") == "剪贴板_*.txt")
+check("清理解析·语音缓存", "duoduo_tts" in (tools.parse_cleanup_request("清空语音缓存") or {}).get("folder", ""))
+check("清理解析·不误判", tools.parse_cleanup_request("清理一下房间") is None)
+_clean_dir = _tempfile.mkdtemp()
+for _n in ("多多截图_1.png", "我的照片.png"):
+    with open(os.path.join(_clean_dir, _n), "w", encoding="utf-8") as _f:
+        _f.write("x")
+_files = tools.collect_cleanup_files({"folder": _clean_dir, "pattern": "多多截图_*.png", "desc": "t"})
+check("清理只挑自己生成的文件",
+      len(_files) == 1 and _files[0].endswith("多多截图_1.png"),
+      str([os.path.basename(x) for x in _files]))
+check("清理遇到不存在的目录返回空",
+      tools.collect_cleanup_files({"folder": os.path.join(_clean_dir, "没有"), "pattern": "*", "desc": "t"}) == [])
+os.remove(_tmpfile)
+_shutil.rmtree(_clean_dir, ignore_errors=True)
+
 print("=" * 46)
 failed = [n for n, ok in results if not ok]
 print(f"PASS {len(results) - len(failed)}/{len(results)}")
