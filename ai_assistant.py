@@ -16,11 +16,16 @@ ai_assistant.py —— 桌宠"多多"智能助手（独立模块，不依赖 PyQ
 
 配置：config.json（首次运行自动生成模板）
   {"api_base":"https://api.deepseek.com/v1","api_key":"","model":"deepseek-chat"}
-  也可用环境变量 DEEPSEEK_API_KEY / OPENAI_API_KEY 提供密钥。
+  也可用环境变量 DUODUO_API_KEY / DEEPSEEK_API_KEY / OPENAI_API_KEY 提供密钥。
 """
 import os
 import re
 import json
+import ssl
+import threading
+import http.client
+import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 
@@ -366,6 +371,137 @@ SYSTEM_PROMPT = """你是{name}，一只住在主人电脑桌面上的小猫宠�
 另外：多多确实能删文件（删除进回收站、会先列清单等确认）。主人说「删掉桌面上那张图」这类话时不要回答「我不会删除」，让他说文件名、路径或「删掉第1个」即可。\n规则：一次最多一个标签；能靠聊天回答的不要滥用工具；不确定时就不要加标签。"""
 
 
+# ------------------------------------------------------------------
+# 流式显示辅助：把增量文本切成"可以马上念"的句子，并把标签摘干净
+# ------------------------------------------------------------------
+TAG_RE = re.compile(r"\[(?:action|tool|mood)\s*:[^\]]*\]", re.I)
+PARTIAL_TAG_RE = re.compile(r"\[[^\[\]]*$")     # 还没收完的半个标签，先藏着
+SENT_END = "。！？!?…；\n"
+SENT_MID = "，,、：:"
+
+
+def strip_stream_tags(text):
+    """流式显示用：去掉完整标签，并把没写完的半个标签临时藏起来（免得冒出“[act”）。"""
+    return PARTIAL_TAG_RE.sub("", TAG_RE.sub("", text or ""))
+
+
+def take_sentences(buf, min_len=12, max_len=40, flush=False):
+    """
+    从流式缓冲里切出"现在就能念"的句子，返回 (句子列表, 剩下的尾巴)。
+
+    规则：先找句末标点；一直等不到就退一步在逗号处断；再没有就按 max_len 硬切。
+    flush=True（流结束）时把剩下的尾巴也交出来。
+    """
+    out, rest = [], (buf or "")
+    while True:
+        cut = -1
+        for i, ch in enumerate(rest):
+            if ch in SENT_END and i + 1 >= min_len:
+                cut = i + 1
+                break
+        if cut < 0 and len(rest) >= max_len:
+            for i in range(len(rest) - 1, min_len - 1, -1):
+                if rest[i] in SENT_MID:
+                    cut = i + 1
+                    break
+            if cut < 0:
+                cut = max_len
+        if cut < 0:
+            break
+        out.append(rest[:cut])
+        rest = rest[cut:]
+    if flush:
+        if rest.strip():
+            out.append(rest)
+        rest = ""
+    return out, rest
+
+
+# ------------------------------------------------------------------
+# 传输层：复用一条 HTTPS 连接
+#   以前每次提问都 urlopen 新建连接 = 每次重做一遍 DNS + TLS（实测 ~200-400ms/次）。
+#   这里留一条连接复用；系统代理开着时仍然走 urllib（按系统代理走），行为与以前一致。
+# ------------------------------------------------------------------
+def _system_proxy_enabled():
+    """看 Windows 的系统代理开没开（读不到就当没开）。"""
+    if os.name != "nt":
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings") as k:
+            return bool(winreg.QueryValueEx(k, "ProxyEnable")[0])
+    except Exception:
+        return False
+
+
+class _HTTPPool:
+    """一条可复用的 HTTP(S) 连接；被服务端关掉时自动丢连接重试一次。"""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._conn = None
+        self._key = None
+
+    @staticmethod
+    def _split(url):
+        u = urllib.parse.urlsplit(url)
+        tls = u.scheme != "http"
+        return (u.hostname, u.port or (443 if tls else 80), tls, u.path or "/v1/chat/completions")
+
+    def _connect(self, key, timeout):
+        host, port, tls, _path = key
+        if tls:
+            return http.client.HTTPSConnection(host, port, timeout=timeout,
+                                               context=ssl.create_default_context())
+        return http.client.HTTPConnection(host, port, timeout=timeout)
+
+    def _close_locked(self):
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+        self._conn = None
+        self._key = None
+
+    def _ensure_locked(self, key, timeout):
+        if self._conn is None or self._key != key:
+            self._close_locked()
+            self._conn = self._connect(key, timeout)
+            self._key = key
+        return self._conn
+
+    def drop(self):
+        """丢掉当前连接（读到一半出错时用，别把脏连接留给下一轮）。"""
+        with self._lock:
+            self._close_locked()
+
+    def warmup(self, url, timeout=10):
+        """只把连接建起来，不发请求、不花 token：第一次提问就不用再握手。"""
+        key = self._split(url)
+        with self._lock:
+            self._ensure_locked(key, timeout).connect()
+
+    def post(self, url, body, headers, timeout):
+        """POST 一次并返回响应对象（连接留在池里复用）。失败自动重连一次。"""
+        key = self._split(url)
+        base_path = key[3]
+        with self._lock:
+            for attempt in (1, 2):
+                conn = self._ensure_locked(key, timeout)
+                try:
+                    conn.timeout = timeout
+                    if getattr(conn, "sock", None) is not None:
+                        conn.sock.settimeout(timeout)
+                    conn.request("POST", base_path, body, headers)
+                    return conn.getresponse()
+                except Exception:
+                    self._close_locked()        # 多半是 keep-alive 被服务端关了
+                    if attempt == 2:
+                        raise
+
+
 class LLMClient:
     """OpenAI 兼容大模型客户端。未配置 key 时 configured=False，主程序走本地逻辑。"""
 
@@ -373,6 +509,8 @@ class LLMClient:
         self.cfg = load_config()
         self.system = SYSTEM_PROMPT
         self.history = []            # [{"role": "user"/"assistant", "content": ...}]
+        self.use_pool = True         # 复用连接；代理环境或单测里可置 False 退回 urllib
+        self._pool = _HTTPPool()
 
     @property
     def configured(self):
@@ -389,32 +527,127 @@ class LLMClient:
         if len(self.history) > keep:
             self.history = self.history[-keep:]
 
-    # ---- 请求 ----
-    def chat(self, user_text: str, name: str = "多多", affection: int = 0) -> str:
-        """同步请求一次对话（带多轮记忆），返回模型原文。失败抛异常由调用方处理。"""
+    # ---- 传输：优先复用连接，代理环境退回 urllib ----
+    def _endpoint(self):
+        return self.cfg["api_base"].rstrip("/") + "/chat/completions"
+
+    def _headers(self):
+        return {"Content-Type": "application/json",
+                "Authorization": f"Bearer {self.cfg['api_key']}"}
+
+    @staticmethod
+    def _check_status(resp):
+        """http.client 不像 urllib 那样对 4xx/5xx 抛错，这里补上，保证上层错误处理不变。"""
+        code = getattr(resp, "status", 200)
+        if code >= 400:
+            raise urllib.error.HTTPError("", code, getattr(resp, "reason", ""), None, None)
+
+    def warmup(self):
+        """启动时预热连接（不发请求、不花 token）。失败不影响使用。"""
+        if not self.use_pool or _system_proxy_enabled():
+            return False
+        try:
+            self._pool.warmup(self._endpoint())
+            app_health.log("大模型连接已预热（省掉首次握手）")
+            return True
+        except Exception as e:
+            app_health.log(f"预热连接失败，下次提问重新握手：{e}", level=20)
+            return False
+
+    def _pool_post(self, body, timeout):
+        """优先走复用连接；返回 None 表示这次改用 urllib（代理环境 / 连接失败）。"""
+        if not self.use_pool or _system_proxy_enabled():
+            return None
+        try:
+            return self._pool.post(self._endpoint(), body, self._headers(), timeout)
+        except Exception as e:
+            app_health.log(f"复用连接不可用，这次改用 urllib：{e.__class__.__name__}: {e}", level=20)
+            return None
+
+    def _urllib_request(self, body, timeout):
+        return urllib.request.Request(self._endpoint(), data=body, headers=self._headers())
+
+    def _body(self, user_text, name, affection, stream=False,
+              with_history=True, max_tokens=None):
+        """拼请求体。with_history=False 用于工具回灌那一轮（不带历史、更快、不污染记忆）。"""
         messages = [{"role": "system", "content": self.system.format(
             name=name, affection=affection, now=datetime.now().strftime("%m月%d日 %H:%M"))}]
-        messages += self.history
+        if with_history:
+            messages += self.history
         messages.append({"role": "user", "content": user_text})
-        body = json.dumps({
+        payload = {
             "model": self.cfg.get("model", "deepseek-chat"),
             "messages": messages,
             "temperature": float(self.cfg.get("temperature", 1.1)),
-            "max_tokens": int(self.cfg.get("max_tokens", 300)),
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            self.cfg["api_base"].rstrip("/") + "/chat/completions",
-            data=body,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.cfg['api_key']}",
-            },
-        )
-        with self._open(req, self.cfg.get("timeout", 30)) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        reply = data["choices"][0]["message"]["content"].strip()
+            "max_tokens": int(max_tokens or self.cfg.get("max_tokens", 300)),
+        }
+        if stream:
+            payload["stream"] = True
+        return json.dumps(payload).encode("utf-8")
+
+    def _chat_once(self, body, timeout):
+        """一次非流式请求，返回模型原文。"""
+        resp = self._pool_post(body, timeout)
+        if resp is not None:
+            self._check_status(resp)
+            raw = resp.read()
+        else:
+            with self._open(self._urllib_request(body, timeout), timeout) as r:
+                raw = r.read()
+        return json.loads(raw.decode("utf-8"))["choices"][0]["message"]["content"].strip()
+
+    # ---- 请求 ----
+    def chat(self, user_text: str, name: str = "多多", affection: int = 0) -> str:
+        """同步请求一次对话（带多轮记忆），返回模型原文。失败抛异常由调用方处理。"""
+        reply = self._chat_once(self._body(user_text, name, affection),
+                                self.cfg.get("timeout", 30))
         self._remember(user_text, reply)
         return reply
+
+    def chat_stream(self, user_text, name="多多", affection=0, on_delta=None):
+        """
+        流式请求：每收到一小段就回调 on_delta(片段)，返回拼好的全文。
+        好处是"首字先到、边到边说"，不用等整句生成完（长回复能早好几秒看到/听到）。
+        """
+        body = self._body(user_text, name, affection, stream=True)
+        timeout = self.cfg.get("timeout", 30)
+        resp = self._pool_post(body, timeout)
+        pooled = resp is not None
+        if not pooled:
+            resp = self._open(self._urllib_request(body, timeout), timeout)
+        try:
+            self._check_status(resp)
+            parts = []
+            for line in resp:
+                if isinstance(line, bytes):
+                    line = line.decode("utf-8", "ignore")
+                line = line.strip()
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    delta = json.loads(payload)["choices"][0].get("delta", {}).get("content")
+                except Exception:
+                    continue                    # 心跳包/空包，跳过
+                if delta:
+                    parts.append(delta)
+                    if on_delta:
+                        on_delta(delta)
+            reply = "".join(parts).strip()
+            self._remember(user_text, reply)
+            return reply
+        except Exception:
+            if pooled:
+                self._pool.drop()               # 读到一半出错：脏连接不要留给下一轮
+            raise
+        finally:
+            if not pooled:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
 
     @staticmethod
     def _open(req, timeout):
@@ -461,3 +694,34 @@ class LLMClient:
                 callback(self._friendly_error(e), None, None, None)
 
         app_health.run_async(worker)     # 共享任务池：并发有上限，不再一次一问新起线程
+
+    def ask_stream_async(self, user_text, name, affection, on_delta, on_done):
+        """
+        后台流式提问。on_delta 在子线程里被反复调用（每来一小段调一次），
+        on_done(text, action, tool, mood) 收尾。主程序要把 on_delta 转投 Qt 信号。
+        """
+        def worker():
+            try:
+                raw = self.chat_stream(user_text, name, affection, on_delta)
+                reply, action, tool, mood = parse_tags(raw)
+                on_done(reply or "喵…（对方没说话）", action, tool, mood)
+            except Exception as e:
+                on_done(self._friendly_error(e), None, None, None)
+
+        app_health.run_async(worker)
+
+    def ask_note_async(self, note, name, affection, callback):
+        """
+        工具结果回灌那一轮专用：不带历史、只给 60 token。
+        既快（prompt 从几 KB 降到几百 B），也不会把"（系统提示）…"写进对话记忆。
+        """
+        def worker():
+            try:
+                body = self._body(note, name, affection, with_history=False, max_tokens=60)
+                raw = self._chat_once(body, self.cfg.get("timeout", 30))
+                reply, action, tool, mood = parse_tags(raw)
+                callback(reply or "喵~", action, tool, mood)
+            except Exception as e:
+                callback(self._friendly_error(e), None, None, None)
+
+        app_health.run_async(worker)

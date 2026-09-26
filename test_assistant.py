@@ -75,6 +75,33 @@ finally:
     import shutil
     shutil.rmtree(tmp, ignore_errors=True)
 
+def stub_llm(llm, fn):
+    """
+    把 llm.chat（非流式）与 llm.chat_stream（流式）一起替换成 fn(text)。
+    主聊天路径现在走**流式**，两个都得打桩，否则测试会打真网络。
+    """
+    old = {k: llm.__dict__.get(k) for k in ("chat", "chat_stream")}
+    llm.chat = lambda t, name="多多", aff=0: fn(t)
+
+    def _stream(t, name="多多", aff=0, on_delta=None):
+        out = fn(t)
+        if on_delta and out:
+            on_delta(out)
+        return out
+
+    llm.chat_stream = _stream
+    return old
+
+
+def unstub_llm(llm, old):
+    """恢复真实方法（恢复不了实例属性时直接删掉，让它落回类方法）。"""
+    for k, v in old.items():
+        if v is None:
+            llm.__dict__.pop(k, None)
+        else:
+            llm.__dict__[k] = v
+
+
 client = ai.LLMClient()
 client.cfg["api_key"] = ""
 check("LLM 未配置时禁用", not client.configured)
@@ -428,7 +455,9 @@ try:
         cb("喵~ 已经帮你打开第一个啦", None, None, None)      # 同步回调，验证接线
 
     real_ask = pet.brain.llm.ask_async
+    real_note = pet.brain.llm.ask_note_async
     pet.brain.llm.ask_async = _sync_ask
+    pet.brain.llm.ask_note_async = _sync_ask     # 回灌那一轮现在走"不带历史的小请求"
     try:
         pet._tool_rounds = 0
         pet._on_llm_reply("我找找看喵", "", ("find", "pet_data"))
@@ -448,6 +477,7 @@ try:
         check("工具链最多追加一轮", len(asked) <= 3, f"ask次数={len(asked)}")
     finally:
         pet.brain.llm.ask_async = real_ask
+        pet.brain.llm.ask_note_async = real_note
         pet.brain.llm.cfg["api_key"] = ""
 
     # 4) 看家模式：离开→睡、回来→打招呼、久坐→提醒
@@ -488,7 +518,7 @@ try:
         return "喵~ 这是一份测试文档，共 2 行"
 
     pet.brain.llm.cfg["api_key"] = "test-key"
-    pet.brain.llm.chat = _drop_chat
+    _old_llm = stub_llm(pet.brain.llm, _drop_chat)
     try:
         pet.handle_dropped_files([txt])
         pump(1000)
@@ -516,7 +546,7 @@ try:
         check("忘掉后不再带上文件内容",
               prompts2 and "拖拽测试内容" not in prompts2[-1], str(prompts2[-1:])[:60])
     finally:
-        pet.brain.llm.__dict__.pop("chat", None)
+        unstub_llm(pet.brain.llm, _old_llm)
         pet.brain.llm.cfg["api_key"] = ""
         try:
             os.remove(txt)
@@ -633,13 +663,17 @@ try:
     check("超过条数给提示", "只记了" in pet.bubble.label.text(), pet.bubble.label.text()[:24])
 
     # ---- 程序化眨眼 / 呼吸随机化 ----
-    check("眼睛自动定位到两只", len(pet._eye_spots) == 2, str(pet._eye_spots))
-    check("眼睛半径合理（不会撑成半张脸）",
-          all(6 <= r <= 30 for _x, _y, r in pet._eye_spots), str(pet._eye_spots))
-    check("眨眼的左右位置与猫脸匹配",
-          abs(pet._eye_spots[0][0] - pet._eye_spots[1][0]) < 200
-          and abs(pet._eye_spots[0][1] - pet._eye_spots[1][1]) < 20,
-          str(pet._eye_spots))
+    # 眼睛定位要读真实帧素材（frames_opt 70MB，不进仓库）：CI 里没有素材就跳过这 3 项
+    if os.path.isdir("frames_opt") or os.path.isdir("frames"):
+        check("眼睛自动定位到两只", len(pet._eye_spots) == 2, str(pet._eye_spots))
+        check("眼睛半径合理（不会撑成半张脸）",
+              all(6 <= r <= 30 for _x, _y, r in pet._eye_spots), str(pet._eye_spots))
+        check("眨眼的左右位置与猫脸匹配",
+              abs(pet._eye_spots[0][0] - pet._eye_spots[1][0]) < 200
+              and abs(pet._eye_spots[0][1] - pet._eye_spots[1][1]) < 20,
+              str(pet._eye_spots))
+    else:
+        print("SKIP 眼睛定位（本机没有 frames_opt/ 素材）")
     pet.change_state("idle", "loop")
     pet.hop_active = False           # 清掉前面测试留下的物理状态
     pet.hover = 0.0
@@ -755,12 +789,12 @@ try:
     # 提问时带上记忆
     captured = []
     pet.brain.llm.cfg["api_key"] = "test"
-    pet.brain.llm.chat = lambda t, name="多多", aff=0: (captured.append(t) or "喵")
+    _old_llm = stub_llm(pet.brain.llm, lambda t: (captured.append(t) or "喵"))
     pet._do_command("memory", {"action": "add", "text": "牛奶快没了"})
     pet.handle_user_message("我明天要干什么")
     pump(900)
     check("提问带上长期记忆", captured and "周四有例会" in captured[-1], str(captured[-1:])[:70])
-    pet.brain.llm.__dict__.pop("chat", None)
+    unstub_llm(pet.brain.llm, _old_llm)
     pet.brain.llm.cfg["api_key"] = ""
     pet._do_command("memory", {"action": "forget", "index": 1})
     check("按序号忘掉", len(pet.memories) == 1 and "周四" in pet.memories[0], str(pet.memories))
@@ -960,7 +994,7 @@ try:
         time.sleep(0.5)          # 放慢，才能观察到"思考中"这一帧
         return "喵～星星眨眼睛是大气在动呀"
 
-    pet.brain.llm.chat = _slow_chat
+    _old_llm = stub_llm(pet.brain.llm, _slow_chat)
     try:
         pet.handle_user_message("给我讲讲星星为什么会眨眼睛")
         pump(60)
@@ -971,7 +1005,7 @@ try:
         check("LLM回调替换气泡", "星星" in pet.bubble.label.text()
               and "想" not in pet.bubble.label.text(), pet.bubble.label.text()[:40])
     finally:
-        pet.brain.llm.__dict__.pop("chat", None)   # 恢复真实 chat 方法
+        unstub_llm(pet.brain.llm, _old_llm)        # 恢复真实 chat / chat_stream
         pet.brain.llm.cfg["api_key"] = ""
 finally:
     os.startfile = real_startfile
@@ -984,6 +1018,7 @@ import json as _json
 net = ai.LLMClient()
 net.cfg["api_key"] = "test-key"
 net.cfg["history_turns"] = 2
+net.use_pool = False          # 这一段测的是 urllib 路径（超时/401/请求体），别走复用连接
 sent = []
 
 
@@ -1073,6 +1108,7 @@ finally:
 # ============ 4. 死代理兜底（VPN 关掉后仍有直连重试） ============
 net2 = ai.LLMClient()
 net2.cfg["api_key"] = "test-key"
+net2.use_pool = False         # 同上：走 urllib 才能验证"死代理 → 直连重试"
 calls = {"urlopen": 0, "opener": 0}
 
 

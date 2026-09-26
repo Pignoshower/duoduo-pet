@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Platform">
   <img src="https://img.shields.io/badge/Python-3.10-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/PyQt6-6.x-41CD52?style=for-the-badge&logo=qt&logoColor=white" alt="PyQt6">
-  <img src="https://img.shields.io/badge/Tests-501%20passed-2EA043?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-548%20passed-2EA043?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests">
   <img src="https://github.com/Pignoshower/duoduo-pet/actions/workflows/tests.yml/badge.svg" alt="CI">
   <img src="https://img.shields.io/badge/License-MIT%20%2F%20%E7%B4%A0%E6%9D%90%E9%9D%9E%E5%95%86%E7%94%A8-8957E5?style=for-the-badge" alt="License">
 
@@ -92,7 +92,7 @@ python 多多.py
 <td width="50%" valign="top">
 
 <b>💬 会聊天的助手</b><br>
-接任意 OpenAI 兼容接口。不填 key 也能用——时间、音量、截图、系统状态、找文件这些都是本地识别，不联网。
+接任意 OpenAI 兼容接口。不填 key 也能用——时间、音量、截图、系统状态、找文件这些都是本地识别，不联网。回复走**流式**（边到边显示、成句先念），连接复用 + 启动预热，首字比原来早半秒以上。
 
 </td>
 <td width="50%" valign="top">
@@ -260,7 +260,7 @@ edge-tts 走 aiohttp，不读 Windows 的 IE 代理设置，程序会自己从�
 | `使用说明.md` | 全部指令、配置项与排错表 |
 | `requirements.txt`、`requirements-dev.txt` | 运行依赖 / 开发依赖（测试、素材流水线、打包） |
 | `LICENSE`、`LICENSE-ASSETS.md` | 代码 MIT / 美术素材仅限非商用 |
-| `.github/workflows/tests.yml` | CI：每次提交离屏跑不需要素材的 4 套测试 |
+| `.github/workflows/tests.yml` | CI 两级：无需素材的 290 项 + 拉 Release 素材跑全量 548 项 |
 | `docs/` | 上面的预览图与动图 |
 
 <details>
@@ -272,13 +272,14 @@ edge-tts 走 aiohttp，不读 Windows 的 IE 代理设置，程序会自己从�
 $env:QT_QPA_PLATFORM="offscreen"
 python selftest.py          # 29：帧资源、动画状态机、转圈首尾一致（需 frames_opt/）
 python test_app_smoke.py    # 31：应用级冒烟（需 frames_opt/）
-python test_assistant.py    # 198：大模型层（打桩，不联网）、删除与控制台闸门、安静模式
+python test_assistant.py    # 198：大模型层（打桩，不联网）、删除与控制台闸门、安静模式（眼睛定位需素材）
 python test_tools.py        # 193：语音、日程、音量、快照、删除规则、危险命令
 python test_privacy.py      # 26：key 环境变量、不写回 key、外发闸门
-python test_repo_health.py  # 24：依赖/许可/CI 齐全、任务池线程数、版本号
+python test_stream.py       # 45：连接复用/预热/重连、流式拼装与分句、工具回轮体积
+python test_repo_health.py  # 26：依赖/许可/CI 齐全、任务池线程数、版本号
 ```
 
-前两套要做像素级断言，必须有 70MB 的 `frames_opt/`；CI 里没有素材，只跑后四套（共 441 项）。
+前两套要做像素级断言，必须有 70MB 的 `frames_opt/`。CI 因此分两级：**quick** 跑不需要素材的 4 套（290 项），**full** 从 Release 拉 `frames_opt.zip` 后跑全部 7 套（548 项）。
 
 </details>
 

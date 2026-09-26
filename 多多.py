@@ -451,11 +451,12 @@ class AIBrain:
                 # 长期记忆：主人让我记住的事，每次提问都带上（说"我的备忘"可查看）
                 ask = "（主人以前让我记住的事：" + "；".join(_mems[:8]) + "）\n\n主人说：" + ask
             app_health.log("交给大模型处理：" + (text or "")[:40])
-            app_health.log(f"提问发出（{len(ask)} 字，历史 {len(self.llm.history)} 条）")
             self._llm_t0 = time.time()
             app_health.log(f"提问发出（{len(ask)} 字，历史 {len(self.llm.history)} 条）")
-            self.llm.ask_async(ask, self.pet.cat_name, self.pet.affection,
-                               lambda t, a, tool, mood=None: self.pet.llm_reply.emit(t, a or "", tool, mood or ""))
+            self.llm.ask_stream_async(
+                ask, self.pet.cat_name, self.pet.affection,
+                lambda piece: self.pet.llm_delta.emit(piece),
+                lambda t, a, tool, mood=None: self.pet.llm_reply.emit(t, a or "", tool, mood or ""))
             return None, None, True
         return f"歪头~ 喵？虽然不懂主人的意思，但 {self.pet.cat_name} 会一直陪着你。", None, False
 
@@ -646,6 +647,7 @@ class CustomInputBox(QWidget):
 # =====================================================================
 class PetCat(QWidget):
     llm_reply = pyqtSignal(str, str, object, str)   # (文本, 动作, 工具, 情绪)
+    llm_delta = pyqtSignal(str)                     # 流式增量（子线程 → 主线程 → 气泡/语音）
     
     FX_MS = 30
     WALK_STEP = 3.0
@@ -725,6 +727,8 @@ class PetCat(QWidget):
         self._pending_delete = None  # 等待确认的待删清单（确认后才进回收站）
         self._pending_sensitive = None  # 等待确认的敏感操作（控制台 / 运行命令）
         self._pending_send = None      # 等待确认的"要发给大模型的内容"（隐私闸门，见 send_gate）
+        self._speak_seq = 0            # 冒泡计数：判断一次工具执行期间有没有自己说过话
+        self._reset_stream()           # 流式显示状态（增量缓冲/已念句子/已显示长度）
         self.quiet_mode = bool(self.pet_data.get("quiet_mode", 0))   # 安静模式
         self.quiet_range = tuple(self.pet_data.get("quiet_range") or ()) or None
         self.memories = [m for m in (self.pet_data.get("memories") or []) if isinstance(m, str)]
@@ -736,6 +740,7 @@ class PetCat(QWidget):
         self.input_box = CustomInputBox()
         self.input_box.message_sent.connect(self.handle_user_message)
         self.llm_reply.connect(self._on_llm_reply)
+        self.llm_delta.connect(self._on_llm_delta)
 
         self.initUI()
         self._detect_eyes()          # 定位眼睛（眨眼用）
@@ -1380,6 +1385,7 @@ class PetCat(QWidget):
         mood 决定朗读语调（happy/excited/cozy/sleepy/alert/proud/sorry），
         不传就按当前状态推断（吃东西→开心、打哈欠→困倦、踩奶→撒娇…）。
         """
+        self._speak_seq += 1
         self.bubble.show_message(text, duration)
         self.update_ui_positions()
         if self.voice_on and text and not self._is_quiet_now():
@@ -1987,6 +1993,7 @@ class PetCat(QWidget):
 
     def handle_user_message(self, text):
         self._tool_rounds = 0                     # 新一轮对话，重置工具链轮数
+        self._reset_stream()
         reply, action, pending = self.brain.process_input(text)
         if pending:
             self.speak("🤔 让我想想…", 8000)
@@ -1994,24 +2001,81 @@ class PetCat(QWidget):
         if reply: self.speak(reply, duration=5000)
         self._do_action(action)
 
-    def _on_llm_reply(self, text, action, tool=None, mood=None):
-        """大模型异步回复送达（主线程）：先说话，再执行动作 / 工具；mood 决定语调。
+    # ---- 流式回复：边到边显示，整句就念（音色/引擎/语速音调都不动）----
+    STREAM_SHOW_MS = 20000      # 流式期间气泡的保持时长（每来一段都会续期）
+    STREAM_SPOKEN_MAX = 120     # 交给语音的总字数上限（与 speak() 的 [:120] 一致）
 
-        多步工具链：工具执行后如果有"结果文本"，会把它作为补充信息再问大模型一轮，
-        让它接着安排（例如 找文件 → 再决定用哪个程序打开）。最多追加 1 轮，避免死循环。
+    def _reset_stream(self):
+        self._stream_on = False          # 这一轮是否已经进入流式显示
+        self._stream_buf = ""            # 原始增量（含标签，收尾时交给 parse_tags 定稿）
+        self._stream_shown = ""          # 气泡里已显示的（摘掉标签的）文本
+        self._stream_sent_done = 0       # 已交给语音的句子数
+        self._stream_spoken_len = 0      # 已交给语音的字数
+        self._stream_last_ms = 0.0       # 上次刷新气泡的时刻（节流用）
+        self._stream_mood = None
+
+    def _on_llm_delta(self, piece):
+        """流式增量到达（子线程发信号 → 这里在主线程）。"""
+        if not piece:
+            return
+        self._stream_buf += piece
+        clean = ai.strip_stream_tags(self._stream_buf)
+        now = time.time() * 1000
+        if clean != self._stream_shown and (len(clean) - len(self._stream_shown) >= 2
+                                            or now - self._stream_last_ms >= 250):
+            if not self._stream_on:
+                self._stream_on = True
+                self._stream_mood = self._infer_mood()
+            self._stream_shown = clean
+            self._stream_last_ms = now
+            self.bubble.show_message(clean, self.STREAM_SHOW_MS)
+            self.update_ui_positions()
+        self._speak_stream_sentences()
+
+    def _speak_stream_sentences(self, flush=False, mood=None):
+        """把已经成句的部分提早交给语音：开口更早，音色/语速/音调完全不变。"""
+        if self._stream_spoken_len >= self.STREAM_SPOKEN_MAX:
+            return
+        if not (self.voice_on and not self._is_quiet_now()):
+            return
+        clean = ai.strip_stream_tags(self._stream_buf)
+        sentences, _rest = ai.take_sentences(clean, flush=flush)
+        for s in sentences[self._stream_sent_done:]:
+            s = re.sub(r"\s+", "", s)
+            left = self.STREAM_SPOKEN_MAX - self._stream_spoken_len
+            if not s or left <= 0:
+                continue
+            self.speaker.say(s[:left], mood=mood or self._stream_mood or self._infer_mood())
+            self._stream_spoken_len += min(len(s), left)
+        self._stream_sent_done = len(sentences)
+
+    def _on_llm_reply(self, text, action, tool=None, mood=None):
+        """大模型回复送达（主线程）：先说话，再执行动作 / 工具；mood 决定语调。
+
+        流式那一轮里气泡与语音已经边到边处理过，这里只补最后一句 + 收尾。
+        多步工具链：只在"工具自己没冒泡"（如找文件只列了清单）时才回灌再问一轮，
+        且这一轮不带历史、只给 60 token（原来会把几 KB 历史再发一遍）。
         """
-        if text:
+        if self._stream_on:
+            self._speak_stream_sentences(flush=True, mood=mood)
+            self._reset_stream()
+            if text:
+                self.bubble.show_message(text, min(12000, 3000 + len(text) * 120))
+                self.update_ui_positions()
+        elif text:
             self.speak(text, duration=min(12000, 3000 + len(text) * 120), mood=mood or None)
         self._do_action(action)
+        spoke_before = self._speak_seq
         result = self._run_tool(tool) if tool else None
-        if result and self._tool_rounds < MAX_TOOL_ROUNDS and self.brain.llm.configured:
+        said_it = self._speak_seq > spoke_before       # 工具自己已经报过了？
+        if result and not said_it and self._tool_rounds < MAX_TOOL_ROUNDS and self.brain.llm.configured:
             self._tool_rounds += 1
             app_health.log(f"工具链第 {self._tool_rounds} 轮：{tool} -> {result[:80]}")
             note = (f"（系统提示）刚才工具 {tool} 的执行结果是：{result}\n"
                     f"请基于这个结果，用小猫口吻回主人一句（可再带一个 [action:] 或 [tool:] 标签）；"
                     f"如果没有要紧事，就只是一句简短的话，不要重复上面的内容。")
-            self.brain.llm.ask_async(note, self.cat_name, self.affection,
-                                     lambda t, a, tl, mo=None: self.llm_reply.emit(t, a or "", tl, mo or ""))
+            self.brain.llm.ask_note_async(note, self.cat_name, self.affection,
+                                          lambda t, a, tl, mo=None: self.llm_reply.emit(t, a or "", tl, mo or ""))
 
     def _run_tool(self, tool):
         """执行大模型请求的工具（白名单，安全可控）。返回给模型看的"结果文本"（没用工具就返回 None）。"""
@@ -2941,6 +3005,8 @@ if __name__ == '__main__':
         app_health.log("配置自检发现问题: " + "；".join(problems), level=30)
         pet.speak("喵…配置文件有点小问题：\n" + "\n".join("• " + p for p in problems), 12000)
     pet.restore_state()
+    # 预热大模型连接（只建连接、不发请求、不花 token）：第一次提问就不用再付握手钱
+    app_health.run_async(pet.brain.llm.warmup)
     # 单实例唤醒：收到 "show" 就把猫显示出来
     try:
         import socket as _socket

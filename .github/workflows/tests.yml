@@ -1,15 +1,16 @@
 name: tests
 
-# 无素材也能跑的测试：test_assistant（大模型层，打桩不联网）+ test_tools（语音/日程/删除规则）
-# 另外两套（selftest.py / test_app_smoke.py）要做像素级断言，必须有 frames_opt/ 素材（70MB，不进仓库），
-# 所以在 CI 里跳过，本地有素材时照常跑：python selftest.py / python test_app_smoke.py
+# 两级 CI：
+#   quick —— 不需要素材，几十秒出结果（每次提交/PR 都跑）
+#   full  —— 先从 Release 拉 frames_opt.zip（约 68MB，仓库里不放）再跑全部 7 套，
+#            覆盖帧资源、动画状态机、像素级断言这些必须有素材才能验的部分
 on:
   push:
   pull_request:
   workflow_dispatch:
 
 jobs:
-  test:
+  quick:
     runs-on: windows-latest
     env:
       QT_QPA_PLATFORM: offscreen
@@ -22,11 +23,41 @@ jobs:
           cache: pip
       - name: 安装依赖
         run: pip install -r requirements-dev.txt
-      - name: 大模型层测试
-        run: python test_assistant.py
-      - name: 系统能力层测试
+      - name: 系统能力层（语音/日程/音量/删除规则/危险命令）
         run: python test_tools.py
-      - name: 隐私与仓库卫生测试
+      - name: 隐私与提速（外发闸门 / 连接复用 / 流式分句）
         run: |
           python test_privacy.py
-          python test_repo_health.py
+          python test_stream.py
+      - name: 仓库卫生（依赖/许可/CI/版本号/后台任务池）
+        run: python test_repo_health.py
+
+  full:
+    needs: quick
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+      ASSETS_URL: https://github.com/Pignoshower/duoduo-pet/releases/latest/download/frames_opt.zip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: 安装依赖
+        run: pip install -r requirements-dev.txt
+      - name: 取动画素材（Release 里的 frames_opt.zip）
+        shell: pwsh
+        run: |
+          curl.exe -L --retry 8 --retry-all-errors --retry-delay 2 -C - -o frames_opt.zip $env:ASSETS_URL
+          python -c "import zipfile; z=zipfile.ZipFile('frames_opt.zip'); assert z.testzip() is None; z.extractall('.'); print('素材条目:', len(z.namelist()))"
+          if (-not (Test-Path frames_opt/meta.json)) { throw "frames_opt/meta.json 缺失：素材包结构变了" }
+      - name: 帧资源与动画状态机
+        run: python selftest.py
+      - name: 应用级冒烟
+        run: python test_app_smoke.py
+      - name: 大模型层与交互
+        run: python test_assistant.py
+      - name: 系统能力层
+        run: python test_tools.py
