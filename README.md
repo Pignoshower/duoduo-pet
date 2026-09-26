@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Platform">
   <img src="https://img.shields.io/badge/Python-3.10-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/PyQt6-6.x-41CD52?style=for-the-badge&logo=qt&logoColor=white" alt="PyQt6">
-  <img src="https://img.shields.io/badge/Tests-602%20passed-2EA043?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-608%20passed-2EA043?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests">
   <img src="https://github.com/Pignoshower/duoduo-pet/actions/workflows/tests.yml/badge.svg" alt="CI">
   <img src="https://img.shields.io/badge/License-MIT%20%2F%20%E7%B4%A0%E6%9D%90%E9%9D%9E%E5%95%86%E7%94%A8-8957E5?style=for-the-badge" alt="License">
 
@@ -274,7 +274,7 @@ edge-tts 走 aiohttp，不读 Windows 的 IE 代理设置，程序会自己从�
 | `使用说明.md` | 全部指令、配置项与排错表 |
 | `requirements.txt`、`requirements-dev.txt` | 运行依赖 / 开发依赖（测试、素材流水线、打包） |
 | `LICENSE`、`LICENSE-ASSETS.md` | 代码 MIT / 美术素材仅限非商用 |
-| `.github/workflows/tests.yml` | CI 两级：无需素材的 344 项 + 拉 Release 素材跑全量 602 项 |
+| `.github/workflows/tests.yml` | CI 两级：无需素材的 350 项 + 拉 Release 素材跑全量 608 项 |
 | `docs/` | 上面的预览图与动图 |
 
 <details>
@@ -290,11 +290,11 @@ python test_assistant.py    # 198：大模型层（打桩，不联网）、删�
 python test_tools.py        # 193：语音、日程、音量、快照、删除规则、危险命令
 python test_privacy.py      # 26：key 环境变量、不写回 key、外发闸门
 python test_stream.py       # 45：连接复用/预热/重连、流式拼装与分句、工具回轮体积
-python test_music.py        # 54：点歌/切歌/循环随机/说话压低音乐/媒体键（离线）
+python test_music.py        # 60：点歌/切歌/循环随机/说话压低音乐/媒体键遥控（离线）
 python test_repo_health.py  # 26：依赖/许可/CI 齐全、任务池线程数、版本号
 ```
 
-`selftest` 与 `test_app_smoke` 要做像素级断言，必须有 70MB 的 `frames_opt/`。CI 因此分两级：**quick** 跑不需要素材的 5 套（344 项），**full** 从 Release 拉 `frames_opt.zip` 后跑全部 8 套（602 项）。
+`selftest` 与 `test_app_smoke` 要做像素级断言，必须有 70MB 的 `frames_opt/`。CI 因此分两级：**quick** 跑不需要素材的 5 套（350 项），**full** 从 Release 拉 `frames_opt.zip` 后跑全部 8 套（608 项）。
 
 </details>
 

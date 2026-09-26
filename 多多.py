@@ -2174,6 +2174,19 @@ class PetCat(QWidget):
         """音乐指令统一入口（本地识别，不联网）。返回要对主人说的话。"""
         act = (spec or {}).get("action", "play")
         m = self.music
+        # 本地没在放歌时的"下一首/暂停/继续/别放了"= 去按系统媒体键，遥控别的播放器
+        if act in ("next", "prev", "pause", "resume", "toggle", "stop") and not m.active:
+            key = {"next": "next", "prev": "prev", "stop": "stop"}.get(act, "play_pause")
+            vk = tools.media_key(key)
+            word = {"next": "下一首", "prev": "上一首", "stop": "停止",
+                    "play_pause": "播放/暂停"}[key]
+            return (f"好，帮你按了一下「{word}」（控制当前在播的播放器）" if vk
+                    else "喵…按媒体键没成功，主人自己点一下吧")
+        if act == "media":
+            key = (spec or {}).get("key", "play_pause")
+            vk = tools.media_key(key)
+            app_health.log(f"音乐：遥控媒体键 {key} -> {'成功' if vk else '失败'}")
+            return ("按了一下喵～" if vk else "喵…按媒体键没成功")
         if act == "play":
             if (spec or {}).get("shuffle"):
                 m.shuffle = True                          # "随便放首歌"=随机挑一首

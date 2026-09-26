@@ -232,10 +232,9 @@ try:
                                                     "shuffle_on", "now")))
     folder_msg = pet.do_music({"action": "folder"})
     check("打开音乐文件夹", bool(folder_msg) and opened_dirs == [tmp], (folder_msg, opened_dirs))
-    check("别放了之后定时器停下",
-          pet.do_music({"action": "stop"}) and not pet._music_timer.isActive())
     stop_msg = pet.do_music({"action": "stop"})
-    check("没在放歌时停止有提示", "没在放" in stop_msg, stop_msg)
+    check("“别放了”会真的停掉并回话", "不放了" in stop_msg, stop_msg)
+    check("停掉之后自动下一首的定时器也停了", not pet._music_timer.isActive())
     weird_msg = pet.do_music({"action": "???"})
     check("不认识的音乐动作也不炸", "不认识" in weird_msg, weird_msg)
 finally:
@@ -252,6 +251,34 @@ check("猫说话时音乐被压低",
 speaking._unduck(speaking._duck_seq)
 check("说完恢复（时长按字数估）",
       speaking.music.commands[-1].endswith("to 500"), speaking.music.commands[-1])
+
+# ---- 本地没在放歌时：音乐指令变成系统媒体键，遥控别的播放器 ----
+keys = []
+_real_media = tools.media_key
+tools.media_key = lambda k, dry_run=False: (keys.append(k), 0xB0)[1]
+try:
+    remote = FakePet(tools.MusicPlayer(cfg={"dirs": [tmp]}, dry_run=True))
+    msg_next = remote.do_music({"action": "next"})
+    msg_pause = remote.do_music({"action": "pause"})
+    remote.do_music({"action": "stop"})
+    check("本地没放歌时“下一首/暂停/别放了”改成按媒体键",
+          keys == ["next", "play_pause", "stop"], keys)
+    check("遥控时会回话说按了什么",
+          "下一首" in msg_next and "暂停" in msg_pause, (msg_next, msg_pause))
+    check("显式遥控指令也认",
+          remote.do_music({"action": "media", "key": "prev"}) and keys[-1] == "prev", keys)
+    check("“遥控下一首”解析成媒体键 next",
+          (tools.parse_music_request("遥控下一首") or {}).get("key") == "next")
+    check("“遥控暂停”解析成媒体键 play_pause",
+          (tools.parse_music_request("遥控暂停") or {}).get("key") == "play_pause")
+
+    keys.clear()
+    local = FakePet(tools.MusicPlayer(cfg={"dirs": [tmp]}, dry_run=True))
+    local.do_music({"action": "play"})
+    local.do_music({"action": "pause"})
+    check("本地正在放歌时不会去按系统媒体键（优先管自己）", keys == [], keys)
+finally:
+    tools.media_key = _real_media
 
 print("=" * 46)
 failed = [n for n, ok in results if not ok]

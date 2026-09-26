@@ -1895,6 +1895,14 @@ def parse_music_request(text, playing=False):
 
     if has("在放什么", "放的是什么", "现在放的是", "什么歌", "当前歌曲", "音乐状态"):
         return {"action": "now"}
+    # 明确说"遥控"就是去按系统媒体键（控制网易云 / QQ音乐 / Spotify 正在播的那个）
+    if has("遥控"):
+        for word, key in (("下一首", "next"), ("下一曲", "next"), ("上一首", "prev"),
+                          ("上一曲", "prev"), ("暂停", "play_pause"), ("继续", "play_pause"),
+                          ("播放", "play_pause"), ("停止", "stop")):
+            if word in low:
+                return {"action": "media", "key": key}
+        return {"action": "media", "key": "play_pause"}
     if has("别放了", "关掉音乐", "关闭音乐", "停止播放", "停止音乐", "把音乐关", "不听了"):
         return {"action": "stop"}
     if has("音乐文件夹", "打开音乐目录", "音乐在哪", "我的音乐在"):
