@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Platform">
   <img src="https://img.shields.io/badge/Python-3.10-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/PyQt6-6.x-41CD52?style=for-the-badge&logo=qt&logoColor=white" alt="PyQt6">
-  <img src="https://img.shields.io/badge/Tests-548%20passed-2EA043?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-602%20passed-2EA043?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests">
   <img src="https://github.com/Pignoshower/duoduo-pet/actions/workflows/tests.yml/badge.svg" alt="CI">
   <img src="https://img.shields.io/badge/License-MIT%20%2F%20%E7%B4%A0%E6%9D%90%E9%9D%9E%E5%95%86%E7%94%A8-8957E5?style=for-the-badge" alt="License">
 
@@ -147,6 +147,20 @@ edge 神经语音 → Windows OneCore → SAPI → PowerShell 四级降级。八
 <tr>
 <td width="50%" valign="top">
 
+<b>🎵 本地音乐</b><br>
+扫你自己的 `~/Music`（可加 NAS 目录）：`放首歌` / `放周杰伦的` / `下一首` / `暂停` / `别放了`，放完自动下一首。猫说话时音乐自动压低、说完恢复。**不下载、不盗链**——只听你自己的歌。
+
+</td>
+<td width="50%" valign="top">
+
+<b>🔒 隐私与联网</b><br>
+剪贴板与拖入文件外发前可要求确认；API key 支持环境变量、永不写回配置文件。本地能力（时间、音量、截图、找文件、音乐）全部离线。
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
 <b>🖥 多屏与全屏避让</b><br>
 拖到副屏就在副屏活动、按副屏边缘吸附；玩全屏游戏或看视频时自动躲起来，退出全屏自己回来（手动藏起来的不受影响）。
 
@@ -253,14 +267,14 @@ edge-tts 走 aiohttp，不读 Windows 的 IE 代理设置，程序会自己从�
 |---|---|
 | `多多.py` | 窗口、绘制、动画状态机、行为、本地意图、工具派发、敏感操作闸门、外发隐私闸门 |
 | `ai_assistant.py` | 大模型客户端、提示词、动作/工具/情绪标签解析、站点与文件查找、配置读写 |
-| `pet_tools.py` | 语音、日程、安静模式、系统状态、音量、剪贴板历史、回收站删除 |
+| `pet_tools.py` | 语音、日程、安静模式、系统状态、音量、剪贴板历史、回收站删除、本地音乐播放器 |
 | `app_health.py` | 日志、版本号、后台任务池、单实例锁、开机自启、配置自检、空闲检测、全屏检测 |
 | `build_exe.py` | PyInstaller 打包，图标由素材首帧生成 |
 | `pipeline.py`、`snapshot.py` | 素材流水线与快照回退，只在你要自己改素材时用到 |
 | `使用说明.md` | 全部指令、配置项与排错表 |
 | `requirements.txt`、`requirements-dev.txt` | 运行依赖 / 开发依赖（测试、素材流水线、打包） |
 | `LICENSE`、`LICENSE-ASSETS.md` | 代码 MIT / 美术素材仅限非商用 |
-| `.github/workflows/tests.yml` | CI 两级：无需素材的 290 项 + 拉 Release 素材跑全量 548 项 |
+| `.github/workflows/tests.yml` | CI 两级：无需素材的 344 项 + 拉 Release 素材跑全量 602 项 |
 | `docs/` | 上面的预览图与动图 |
 
 <details>
@@ -276,10 +290,11 @@ python test_assistant.py    # 198：大模型层（打桩，不联网）、删�
 python test_tools.py        # 193：语音、日程、音量、快照、删除规则、危险命令
 python test_privacy.py      # 26：key 环境变量、不写回 key、外发闸门
 python test_stream.py       # 45：连接复用/预热/重连、流式拼装与分句、工具回轮体积
+python test_music.py        # 54：点歌/切歌/循环随机/说话压低音乐/媒体键（离线）
 python test_repo_health.py  # 26：依赖/许可/CI 齐全、任务池线程数、版本号
 ```
 
-前两套要做像素级断言，必须有 70MB 的 `frames_opt/`。CI 因此分两级：**quick** 跑不需要素材的 4 套（290 项），**full** 从 Release 拉 `frames_opt.zip` 后跑全部 7 套（548 项）。
+`selftest` 与 `test_app_smoke` 要做像素级断言，必须有 70MB 的 `frames_opt/`。CI 因此分两级：**quick** 跑不需要素材的 5 套（344 项），**full** 从 Release 拉 `frames_opt.zip` 后跑全部 8 套（602 项）。
 
 </details>
 

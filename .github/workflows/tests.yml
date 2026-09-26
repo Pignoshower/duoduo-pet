@@ -29,6 +29,8 @@ jobs:
         run: |
           python test_privacy.py
           python test_stream.py
+      - name: 音乐（本地曲库 / 点歌 / 压低音量 / 媒体键）
+        run: python test_music.py
       - name: 仓库卫生（依赖/许可/CI/版本号/后台任务池）
         run: python test_repo_health.py
 

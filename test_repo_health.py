@@ -61,7 +61,8 @@ if exists(wf):
     y = read(wf)
     check("CI 跑 test_assistant / test_tools", "test_assistant.py" in y and "test_tools.py" in y)
     check("CI 用离屏模式", "offscreen" in y)
-    check("CI 有不需要素材的快速档", "quick:" in y and "test_stream.py" in y)
+    check("CI 有不需要素材的快速档",
+          "quick:" in y and "test_stream.py" in y and "test_music.py" in y)
     check("CI 会用 Release 素材跑全量（含帧资源与冒烟）",
           "frames_opt.zip" in y and "selftest.py" in y and "test_app_smoke.py" in y)
     check("CI 说明了素材从哪来", "releases/latest/download" in y)

@@ -286,6 +286,11 @@ class AIBrain:
         if any(k in low for k in ("换个声音", "换个音色", "换一个声音", "下一个音色", "变声")):
             return None, "next_voice"
 
+        # 音乐（本地曲库 + 系统媒体键，都不联网）
+        mus = tools.parse_music_request(text, playing=bool(getattr(self.pet.music, "active", False)))
+        if mus:
+            return None, ("music", mus)
+
         # 敏感操作：打开控制台 / 删除指定路径 / 运行命令（都先确认）
         cons = tools.parse_console_request(text)
         if cons:
@@ -733,6 +738,9 @@ class PetCat(QWidget):
         self.quiet_range = tuple(self.pet_data.get("quiet_range") or ()) or None
         self.memories = [m for m in (self.pet_data.get("memories") or []) if isinstance(m, str)]
         self.clip_history = tools.ClipboardHistory(10)
+        self.music = tools.MusicPlayer()          # 本地曲库播放器（MCI，不联网）
+        self._music_timer = None                  # 播完自动下一首用的定时器
+        self._duck_seq = 0                        # 说话压低音乐的去重序号
         self._clip_seen = ""         # 上一次看到的剪贴板内容（用于轮询）
 
         self.bubble = ChatBubble()
@@ -1393,6 +1401,7 @@ class PetCat(QWidget):
             spoken = spoken.replace("\n", "，")[:120]
             if spoken.strip():
                 self.speaker.say(spoken, mood=mood or self._infer_mood())
+                self._duck_music(len(spoken))     # 说话时把音乐压低，说完恢复
 
     def mood_showcase(self):
         """情绪语音演示：同一类句子用不同情绪念一遍，方便主人挑喜欢的语调。"""
@@ -1807,6 +1816,22 @@ class PetCat(QWidget):
         tool_menu.addMenu(recent_menu)
         context_menu.addMenu(tool_menu)
 
+        # --- 🎵 音乐（本地曲库；不联网、不下载）---
+        music_menu = QMenu("🎵 音乐", self)
+        for label, spec in (("▶️ 放首歌（顺序第一首）", {"action": "play"}),
+                            ("⏭ 下一首", {"action": "next"}),
+                            ("⏮ 上一首", {"action": "prev"}),
+                            ("⏯ 暂停 / 继续", {"action": "toggle"}),
+                            ("⏹ 别放了", {"action": "stop"}),
+                            ("🔀 随机播放", {"action": "shuffle_on"}),
+                            ("🔂 单曲循环", {"action": "repeat_one"}),
+                            ("🔊 在放什么", {"action": "now"}),
+                            ("📂 打开音乐文件夹", {"action": "folder"})):
+            act = QAction(label, self)
+            act.triggered.connect(lambda _c=False, s=spec: self.speak(self.do_music(s), 6000))
+            music_menu.addAction(act)
+        context_menu.addMenu(music_menu)
+
         # --- 设置 ---
         set_menu = QMenu("⚙️ 设置", self)
         voice_action = QAction(("🔇 语音播报：关" if not self.voice_on else "🔊 语音播报：开"), self)
@@ -1903,7 +1928,10 @@ class PetCat(QWidget):
 
     def _do_command(self, cmd, *args):
         """带参数的指令（元组形式）。"""
-        if cmd == "remind":
+        if cmd == "music":
+            spec = args[0] if args else {}
+            self.speak(self.do_music(spec), 6000)
+        elif cmd == "remind":
             secs, msg = args
             self.speak(self.add_reminder(secs, msg), 6000)
         elif cmd == "schedule":
@@ -2046,6 +2074,7 @@ class PetCat(QWidget):
             if not s or left <= 0:
                 continue
             self.speaker.say(s[:left], mood=mood or self._stream_mood or self._infer_mood())
+            self._duck_music(len(s[:left]))       # 流式每念一句都顺延压低音乐
             self._stream_spoken_len += min(len(s), left)
         self._stream_sent_done = len(sentences)
 
@@ -2139,6 +2168,90 @@ class PetCat(QWidget):
             self.speak(f"喵…这件事我没做成（{e.__class__.__name__}）", 4000)
             return f"工具执行出错：{e.__class__.__name__}"
         return None
+
+    # ---- 音乐：本地曲库播放 + 说话时压低音量 ----
+    def do_music(self, spec):
+        """音乐指令统一入口（本地识别，不联网）。返回要对主人说的话。"""
+        act = (spec or {}).get("action", "play")
+        m = self.music
+        if act == "play":
+            if (spec or {}).get("shuffle"):
+                m.shuffle = True                          # "随便放首歌"=随机挑一首
+            ok, msg = m.play()
+        elif act == "play_query":
+            ok, msg = m.play(query=(spec or {}).get("query"))
+        elif act == "next":
+            ok, msg = m.next()
+        elif act == "prev":
+            ok, msg = m.prev()
+        elif act == "pause":
+            ok, msg = m.pause()
+        elif act == "resume":
+            ok, msg = m.resume()
+        elif act == "toggle":
+            ok, msg = (m.resume() if m.mode() in ("paused", "stopped") else m.pause())
+        elif act == "stop":
+            ok, msg = m.stop()
+        elif act == "now":
+            ok, msg = True, m.now_text()
+        elif act == "repeat_one":
+            m.repeat = "one"
+            ok, msg = True, "好，单曲循环这首～"
+        elif act == "repeat_all":
+            m.repeat = "all"
+            ok, msg = True, "好，列表循环～"
+        elif act == "shuffle_on":
+            m.shuffle = True
+            ok, msg = True, "好，随机播放～"
+        elif act == "folder":
+            ok, msg = self._open_music_folder()
+        else:
+            ok, msg = False, "这个音乐指令我还不认识呢"
+        app_health.log(f"音乐：{act}（{'成功' if ok else '没做成'}）-> {msg}")
+        self._ensure_music_timer()
+        return msg
+
+    def _open_music_folder(self):
+        dirs = list(getattr(self.music, "dirs", None) or [])
+        if not dirs:
+            return False, "我还没找到音乐目录呢（默认找 ~/Music，也能在 config.json 的 music.dirs 里加）"
+        try:
+            os.startfile(dirs[0])
+            return True, f"打开啦：{dirs[0]}"
+        except Exception as e:
+            return False, f"打不开这个文件夹（{e.__class__.__name__}）"
+
+    def _ensure_music_timer(self):
+        """放歌时每 1.5 秒看一次：这首放完了就自动下一首。"""
+        if self._music_timer is None:
+            self._music_timer = QTimer(self)
+            self._music_timer.timeout.connect(self._music_tick)
+        if self.music.active and not self._music_timer.isActive():
+            self._music_timer.start(1500)
+        elif not self.music.active and self._music_timer.isActive():
+            self._music_timer.stop()
+
+    def _music_tick(self):
+        done = self.music.tick()
+        if done:
+            app_health.log(f"「{done}」放完了，自动下一首")
+        self._ensure_music_timer()
+
+    def _duck_music(self, chars):
+        """猫要说话了：把音乐压低，按字数估个时长再恢复（TTS 不回报时长，只能估）。"""
+        m = getattr(self, "music", None)
+        if m is None:
+            return
+        if m.duck(True):
+            self._duck_seq = getattr(self, "_duck_seq", 0) + 1
+            tok = self._duck_seq
+            ms = max(900, 700 + int(chars) * 190)     # 大约 5 字/秒 + 起播延迟
+            QTimer.singleShot(ms, lambda: self._unduck(tok))
+
+    def _unduck(self, tok):
+        m = getattr(self, "music", None)
+        if m is not None and tok == getattr(self, "_duck_seq", 0):
+            m.duck(False)                             # 只有最后一次说话结束才恢复
 
     # ---- 拖拽文件：拖到猫身上就能处理（由 dropEvent 调用）----
     TEXT_EXT = {".txt", ".md", ".markdown", ".py", ".json", ".csv", ".log", ".ini",
@@ -3007,6 +3120,8 @@ if __name__ == '__main__':
     pet.restore_state()
     # 预热大模型连接（只建连接、不发请求、不花 token）：第一次提问就不用再付握手钱
     app_health.run_async(pet.brain.llm.warmup)
+    # 后台扫一遍曲库（几万首也只是几秒），第一次点歌不用等
+    app_health.run_async(pet.music.prewarm)
     # 单实例唤醒：收到 "show" 就把猫显示出来
     try:
         import socket as _socket

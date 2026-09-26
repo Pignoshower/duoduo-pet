@@ -317,6 +317,8 @@ class FakePet:
     _on_llm_delta = PetCat._on_llm_delta
     _speak_stream_sentences = PetCat._speak_stream_sentences
     _on_llm_reply = PetCat._on_llm_reply
+    _duck_music = PetCat._duck_music          # 说话时压低音乐（这个假猫没有 music，自动空转）
+    _unduck = PetCat._unduck
     STREAM_SHOW_MS = PetCat.STREAM_SHOW_MS
     STREAM_SPOKEN_MAX = PetCat.STREAM_SPOKEN_MAX
 

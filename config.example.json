@@ -21,5 +21,12 @@
     "sapi_pitch": 20,
     "sapi_speed": 1,
     "cache": 80
+  },
+  "music": {
+    "_说明": "本地音乐库：默认扫 ~/Music；要加别的目录（比如 D:\\音乐、NAS 映射盘）就填进 dirs",
+    "dirs": [],
+    "volume": 80,
+    "shuffle": false,
+    "duck_when_speaking": true
   }
 }

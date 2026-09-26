@@ -21,7 +21,7 @@ from logging.handlers import RotatingFileHandler
 
 LOG_PATH = os.path.join(os.environ.get("TEMP", "."), "duoduo.log")
 SHORTCUT_NAME = "多多桌宠.lnk"
-APP_VERSION = "1.2.0"        # 版本号只改这一处：启动日志会打出来，方便确认跑的是哪个版本
+APP_VERSION = "1.3.0"        # 版本号只改这一处：启动日志会打出来，方便确认跑的是哪个版本
 
 
 # ------------------------------------------------------------------

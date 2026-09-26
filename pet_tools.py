@@ -18,6 +18,7 @@ import ctypes
 import json
 import os
 import queue as _queue
+import random
 import re
 import socket
 import subprocess
@@ -1823,3 +1824,373 @@ def volume_reply(text):
     if re.search(r"(音量|声音)", t) and re.search(r"(多少|多大|几格|状态)", t):
         return ("status", "喵～音量我看不到具体数字，但可以帮你按大/按小")
     return None
+
+
+# =====================================================================
+# 11. 音乐：本地曲库（Windows MCI 播放）+ 系统媒体键遥控别的播放器
+#     · 只放你自己的歌：扫 ~/Music（或 config.json 的 music.dirs），不碰在线曲库
+#     · 本地没有的歌：多多只负责打开搜索页，由你决定在哪听（不抓流、不下载）
+# =====================================================================
+MUSIC_EXT = (".mp3", ".wav", ".wma", ".m4a", ".flac", ".aac", ".ogg")
+MUSIC_DIRS_DEFAULT = (os.path.join(os.path.expanduser("~"), "Music"),)
+MUSIC_MAX_FILES = 3000          # 曲库上限：别让谁把整块盘挂进来
+MUSIC_SCAN_DEPTH = 4            # 最多往下翻几层目录
+
+_VK_MEDIA = {"play_pause": 0xB3, "next": 0xB0, "prev": 0xB1, "stop": 0xB2}
+
+
+def load_music_config(path=CONFIG_PATH):
+    """读 config.json 的 music 段（缺省：扫 ~/Music、音量 80、顺序播、说话时压低）。"""
+    cfg = {"dirs": [], "volume": 80, "shuffle": False, "duck_when_speaking": True}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        music = raw.get("music") or {}
+        cfg.update({k: v for k, v in music.items() if v is not None})
+    except Exception:
+        pass
+    return cfg
+
+
+def music_dirs(cfg=None):
+    """实际要扫的目录：config 里给了就用，另外永远带上 ~/Music（存在才算）。"""
+    dirs = [d for d in ((cfg or {}).get("dirs") or []) if d]
+    dirs += [d for d in MUSIC_DIRS_DEFAULT if d not in dirs]
+    return [d for d in dirs if os.path.isdir(d)]
+
+
+def media_key(action, dry_run=False):
+    """
+    按一下系统媒体键：控制正在播放的网易云 / QQ音乐 / Spotify / 浏览器都行——多多只当遥控器，
+    不下载、不解析、不碰版权。dry_run=True 只返回虚拟键码、不真的按键（给测试用）。
+    """
+    vk = _VK_MEDIA.get(str(action or "").strip().lower())
+    if not vk:
+        return None
+    if dry_run:
+        return vk
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        user32.keybd_event(vk, 0, 0, 0)
+        user32.keybd_event(vk, 0, 2, 0)          # KEYEVENTF_KEYUP
+        time.sleep(0.03)                          # 按太快会被系统丢掉
+        return vk
+    except Exception:
+        return None
+
+
+def parse_music_request(text, playing=False):
+    """
+    把"放首歌 / 放周杰伦的歌 / 下一首 / 暂停音乐 / 别放了 / 在放什么"解析成 {"action": ...}；
+    不是音乐指令返回 None（交回给大模型）。playing=True 时才认光秃秃的"暂停""继续"。
+    """
+    if not text:
+        return None
+    t = text.strip()
+    low = t.lower()
+
+    def has(*words):
+        return any(w in low for w in words)
+
+    if has("在放什么", "放的是什么", "现在放的是", "什么歌", "当前歌曲", "音乐状态"):
+        return {"action": "now"}
+    if has("别放了", "关掉音乐", "关闭音乐", "停止播放", "停止音乐", "把音乐关", "不听了"):
+        return {"action": "stop"}
+    if has("音乐文件夹", "打开音乐目录", "音乐在哪", "我的音乐在"):
+        return {"action": "folder"}
+    if has("单曲循环", "循环这一首", "重复这一首"):
+        return {"action": "repeat_one"}
+    if has("列表循环", "循环播放", "顺序播放"):
+        return {"action": "repeat_all"}
+    if has("随机播放", "打乱顺序"):
+        return {"action": "shuffle_on"}
+    if has("随便放", "随机来一首", "随便来一首"):
+        return {"action": "play", "shuffle": True}      # 随机放一首（顺便把随机模式打开）
+    if has("下一首", "下一曲", "换一首", "换首歌", "切歌"):
+        return {"action": "next"}
+    if has("上一首", "上一曲", "前一首"):
+        return {"action": "prev"}
+    if has("暂停播放", "暂停音乐", "先暂停"):
+        return {"action": "pause"}
+    if has("继续播放", "接着放歌", "接着放"):
+        return {"action": "resume"}
+    # 光秃秃的"暂停/继续"只在确实在放歌时才认，免得抢了别的指令
+    if playing and low in ("暂停", "停一下", "先停一下"):
+        return {"action": "pause"}
+    if playing and low in ("继续", "继续放"):
+        return {"action": "resume"}
+    if low in ("放歌", "放首歌", "来首歌", "放音乐", "播放音乐", "放点音乐", "听歌"):
+        return {"action": "play"}
+    m = re.search(r"(?:我想听|想听|放一首|放首|放一下|播放|放)\s*[《「\"']?([^》」\"'，。！？\s]{1,20})", t)
+    if m and has("听", "放", "播放"):
+        q = re.sub(r"的?(歌|歌曲|音乐|歌儿)$", "", m.group(1).strip()).strip()
+        if q and not any(q.startswith(p) for p in ("这", "那", "首", "个", "点", "一", "歌", "音乐")):
+            return {"action": "play_query", "query": q}
+    return None
+
+
+class MusicPlayer:
+    """
+    本地音乐播放器（Windows MCI，零额外依赖）：
+      · 扫 ~/Music（或 music.dirs）建曲库，按文件名点歌（"周杰伦 - 晴天.mp3" 这类命名很好用）
+      · 播放 / 暂停 / 继续 / 上一首 / 下一首 / 单曲循环 / 列表循环 / 随机
+      · 猫说话时自动压低音量（duck），说完恢复
+    dry_run=True 时不真的调 MCI，只把命令记进 self.commands（给测试用）。
+    """
+
+    ALIAS = "duoduo_music"
+    DUCK_VOLUME = 180        # 说话时压到 18%
+    MAX_MCI_VOLUME = 1000    # MCI 音量范围 0..1000
+
+    def __init__(self, cfg=None, dry_run=False):
+        self.cfg = cfg if cfg is not None else load_music_config()
+        self.dry_run = dry_run
+        self.dirs = music_dirs(self.cfg)
+        self.volume = max(0, min(100, int(self.cfg.get("volume", 80))))
+        self.shuffle = bool(self.cfg.get("shuffle"))
+        self.duck_when_speaking = bool(self.cfg.get("duck_when_speaking", True))
+        self.repeat = "all"
+        self.commands = []          # dry_run 时记录下来的 MCI 命令
+        self.last_error = ""
+        self._library = None
+        self._lib_sig = None
+        self._tracks = []           # 当前歌单（播放顺序）
+        self._index = -1
+        self._current = None        # (path, title)
+        self._paused = False
+        self._want_playing = False  # "我们认为应该在放"
+        self._ducked = False
+
+    # ---- 曲库 ----
+    def _scan(self, force=False):
+        sig = []
+        for d in self.dirs:
+            try:
+                sig.append((d, os.path.getmtime(d)))
+            except OSError:
+                pass
+        if not force and self._library is not None and sig == self._lib_sig:
+            return self._library
+        tracks = []
+        for root_dir in self.dirs:
+            base_depth = root_dir.rstrip("\\/").count(os.sep)
+            for dirpath, dirnames, filenames in os.walk(root_dir):
+                if dirpath.count(os.sep) - base_depth >= MUSIC_SCAN_DEPTH:
+                    dirnames[:] = []
+                for fn in filenames:
+                    if fn.lower().endswith(MUSIC_EXT):
+                        tracks.append(os.path.join(dirpath, fn))
+                if len(tracks) >= MUSIC_MAX_FILES:
+                    break
+        tracks.sort(key=lambda p: os.path.basename(p).lower())
+        self._library = tracks
+        self._lib_sig = sig
+        app_health.log(f"音乐曲库扫描完成：{len(tracks)} 首（{len(self.dirs)} 个目录）")
+        return tracks
+
+    @staticmethod
+    def title_of(path):
+        """从文件名猜歌名："周杰伦 - 晴天.mp3" → "周杰伦 - 晴天"。"""
+        return os.path.splitext(os.path.basename(path))[0]
+
+    def library(self, force=False):
+        return [self.title_of(p) for p in self._scan(force)]
+
+    def prewarm(self):
+        """启动时后台扫一遍曲库，第一次点歌就不用等扫描。"""
+        try:
+            return len(self._scan())
+        except Exception as e:
+            app_health.log(f"曲库预扫失败：{e}", level=20)
+            return 0
+
+    def search(self, query, limit=5):
+        """按文件名模糊找歌（不分大小写；以查询词开头的排前面）。"""
+        q = "".join((query or "").split()).lower()
+        if not q:
+            return []
+        hits = []
+        for p in self._scan():
+            name = self.title_of(p)
+            flat = "".join(name.split()).lower()
+            if q in flat:
+                hits.append((0 if flat.startswith(q) else 1, name, p))
+        hits.sort(key=lambda x: (x[0], x[1]))
+        return [(n, p) for _s, n, p in hits[:limit]]
+
+    def dirs_text(self):
+        return "、".join(self.dirs) or "（还没找到音乐目录）"
+
+    @property
+    def active(self):
+        """当前有没有一首歌开着（含暂停）。"""
+        return self._current is not None
+
+    @property
+    def title(self):
+        return self._current[1] if self._current else ""
+
+    # ---- MCI ----
+    def _mci(self, cmd):
+        self.commands.append(cmd)
+        if self.dry_run:
+            return True
+        try:
+            import ctypes
+            err = ctypes.windll.winmm.mciSendStringW(cmd, None, 0, None)
+            if err:
+                buf = ctypes.create_unicode_buffer(256)
+                ctypes.windll.winmm.mciGetErrorStringW(err, buf, 256)
+                self.last_error = buf.value
+                app_health.log(f"音乐 MCI 命令失败（{buf.value}）：{cmd}", level=20)
+                return False
+            return True
+        except Exception as e:
+            self.last_error = str(e)
+            return False
+
+    def _mci_result(self, cmd):
+        self.commands.append(cmd)
+        if self.dry_run:
+            return ""
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(256)
+            ctypes.windll.winmm.mciSendStringW(cmd, buf, 256, None)
+            return buf.value.strip()
+        except Exception:
+            return ""
+
+    def mode(self):
+        """MCI 当前状态：playing / paused / stopped。"""
+        if self.dry_run:
+            return "paused" if self._paused else ("playing" if self._want_playing else "stopped")
+        return self._mci_result(f"status {self.ALIAS} mode") or "stopped"
+
+    def _apply_volume(self):
+        vol = self.DUCK_VOLUME if self._ducked else int(self.volume / 100 * self.MAX_MCI_VOLUME)
+        self._mci(f"setaudio {self.ALIAS} volume to {vol}")
+
+    def set_volume(self, value):
+        self.volume = max(0, min(100, int(value)))
+        if self.active:
+            self._apply_volume()
+        return self.volume
+
+    def duck(self, on):
+        """猫说话时压低音乐（再说一句会顺延），说完恢复。"""
+        if not self.duck_when_speaking or not self.active:
+            return False
+        on = bool(on)
+        if on == self._ducked:
+            return False
+        self._ducked = on
+        self._apply_volume()
+        return True
+
+    def _open_and_play(self, path):
+        self._mci(f"close {self.ALIAS}")
+        ok = self._mci(f'open "{path}" type mpegvideo alias {self.ALIAS}')
+        if not ok:                      # flac/m4a 这类看系统解码器，退回不带 type 再试一次
+            ok = self._mci(f'open "{path}" alias {self.ALIAS}')
+        if not ok:
+            self._current = None
+            self._want_playing = False
+            return False
+        self._current = (path, self.title_of(path))
+        self._paused = False
+        self._want_playing = True
+        self._mci(f"play {self.ALIAS}")
+        self._apply_volume()
+        app_health.log(f"放歌：{self._current[1]}")
+        return True
+
+    # ---- 对外 ----
+    def play(self, path=None, query=None):
+        """放歌：给了 query 就按歌名找；否则随机/顺序挑一首。返回 (ok, 给主人的话)。"""
+        tracks = self._scan()
+        if not tracks:
+            return False, (f"我在 {self.dirs_text()} 里一首歌都没找到呀"
+                           f"（把歌放进去，或改 config.json 的 music.dirs）")
+        if query:
+            hits = self.search(query)
+            if not hits:
+                return False, f"曲库里没找到「{query}」呢（找的是 {self.dirs_text()}）"
+            path = hits[0][1]
+        self._tracks = list(tracks)
+        if path:
+            if path not in self._tracks:
+                self._tracks.insert(0, path)
+            self._index = self._tracks.index(path)
+        else:
+            self._index = random.randrange(len(self._tracks)) if self.shuffle else 0
+        return self._play_index()
+
+    def _play_index(self):
+        if not self._tracks:
+            return False, "歌单还是空的"
+        self._index = max(0, min(self._index, len(self._tracks) - 1))
+        path = self._tracks[self._index]
+        if self._open_and_play(path):
+            return True, f"♪ 正在放：{self.title_of(path)}"
+        return False, f"这首我打不开（格式可能不支持）：{self.title_of(path)}"
+
+    def next(self, auto=False):
+        """下一首。auto=True 表示"这首放完了自动切"（单曲循环时原地重放）。"""
+        if not self._tracks:
+            return self.play()
+        if auto and self.repeat == "one":
+            return self._play_index()
+        if self.shuffle and len(self._tracks) > 1:
+            self._index = random.randrange(len(self._tracks))
+        else:
+            self._index = (self._index + 1) % len(self._tracks)
+        return self._play_index()
+
+    def prev(self):
+        if not self._tracks:
+            return False, "还没有歌单呢"
+        self._index = (self._index - 1) % len(self._tracks)
+        return self._play_index()
+
+    def pause(self):
+        if not self.active:
+            return False, "现在没在放歌呀"
+        self._mci(f"pause {self.ALIAS}")
+        self._paused = True
+        return True, f"先停一下：{self.title}"
+
+    def resume(self):
+        if not self.active:
+            return False, "没有可以继续的歌呀"
+        self._mci(f"resume {self.ALIAS}")
+        self._paused = False
+        return True, f"接着放：{self.title}"
+
+    def stop(self):
+        if not self.active and not self._want_playing:
+            return False, "现在没在放歌喵"
+        name = self.title
+        self._mci(f"stop {self.ALIAS}")
+        self._mci(f"close {self.ALIAS}")
+        self._current = None
+        self._paused = False
+        self._want_playing = False
+        self._ducked = False
+        return True, (f"好，不放了（{name}）" if name else "好，不放了")
+
+    def now_text(self):
+        if not self.active:
+            return "现在没在放歌喵"
+        return f"♪ {'暂停中' if self._paused else '正在放'}：{self.title}"
+
+    def tick(self):
+        """定时器每 1.5 秒调一次：一首放完了就自动下一首。返回刚放完的那首（没有就 None）。"""
+        if not self._want_playing or self._paused or not self.active:
+            return None
+        if self.mode() == "playing":
+            return None
+        finished = self.title
+        self.next(auto=True)
+        return finished
