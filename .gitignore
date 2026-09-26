@@ -68,3 +68,7 @@ compare_clips.py
 check_face_artifacts.py
 visual_regression.py
 frames_opt/_baseline.json
+
+# ASCII 名的那份 exe（中文名 `多多.exe` 已在上面忽略，这份曾经漏掉被提交过）
+/duoduo.exe
+/duoduo-*.exe

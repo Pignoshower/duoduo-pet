@@ -21,9 +21,10 @@ ai_assistant.py —— 桌宠"多多"智能助手（独立模块，不依赖 PyQ
 import os
 import re
 import json
-import threading
 import urllib.request
 from datetime import datetime
+
+import app_health
 
 # ------------------------------------------------------------------
 # 常量
@@ -34,6 +35,7 @@ DEFAULT_CONFIG = {
     "api_key": "",
     "model": "deepseek-chat",
     "timeout": 30,
+    "confirm_before_send": False,   # 隐私开关：剪贴板/拖入文件的内容先给主人过目再发给大模型
 }
 
 SITE_MAP = {
@@ -75,13 +77,40 @@ def load_config():
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 cfg.update(json.load(f))
-        except Exception:
-            pass
-    # 环境变量优先
-    key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+        except Exception as e:
+            app_health.log(f"读 config.json 失败（这次先用默认配置）：{e}", level=30)
+    # 环境变量优先：这样 key 可以不落盘（换机器、CI、或不想让别人看到文件时用）
+    key = (os.environ.get("DUODUO_API_KEY")
+           or os.environ.get("DEEPSEEK_API_KEY")
+           or os.environ.get("OPENAI_API_KEY") or "")
     if key:
         cfg["api_key"] = key
+    for env, field in (("DUODUO_API_BASE", "api_base"), ("DUODUO_MODEL", "model")):
+        val = (os.environ.get(env) or "").strip()
+        if val:
+            cfg[field] = val
     return cfg
+
+
+def set_config_values(**pairs):
+    """
+    只更新 config.json 里指定的几个键，返回值表示有没有写成功。
+    **永远不写 api_key**（key 只从文件外读：环境变量或主人自己填），
+    免得程序把 key 又抄进一个能被截图/分享带走的地方。
+    """
+    pairs.pop("api_key", None)
+    try:
+        data = {}
+        if os.path.exists(CONFIG_PATH):
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        data.update(pairs)
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        app_health.log(f"写 config.json 失败：{e}", level=30)
+        return False
 
 
 def ensure_config_file():
@@ -431,4 +460,4 @@ class LLMClient:
             except Exception as e:
                 callback(self._friendly_error(e), None, None, None)
 
-        threading.Thread(target=worker, daemon=True).start()
+        app_health.run_async(worker)     # 共享任务池：并发有上限，不再一次一问新起线程

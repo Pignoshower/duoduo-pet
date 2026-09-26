@@ -1,0 +1,32 @@
+name: tests
+
+# 无素材也能跑的测试：test_assistant（大模型层，打桩不联网）+ test_tools（语音/日程/删除规则）
+# 另外两套（selftest.py / test_app_smoke.py）要做像素级断言，必须有 frames_opt/ 素材（70MB，不进仓库），
+# 所以在 CI 里跳过，本地有素材时照常跑：python selftest.py / python test_app_smoke.py
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: 安装依赖
+        run: pip install -r requirements-dev.txt
+      - name: 大模型层测试
+        run: python test_assistant.py
+      - name: 系统能力层测试
+        run: python test_tools.py
+      - name: 隐私与仓库卫生测试
+        run: |
+          python test_privacy.py
+          python test_repo_health.py

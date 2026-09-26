@@ -1,0 +1,10 @@
+# 多多 · 开发/打包依赖（跑测试、改素材、打 exe）
+#   pip install -r requirements-dev.txt
+-r requirements.txt
+
+# 测试（selftest.py / test_app_smoke.py 做像素级断言）与素材流水线
+numpy>=1.24
+Pillow>=10.0
+
+# 打包 exe：python build_exe.py --clean
+pyinstaller>=6.0

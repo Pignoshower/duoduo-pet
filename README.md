@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
   <img src="docs/preview.png" width="170" alt="多多">
 
   # 🐱 多多 · 桌面宠物猫
@@ -17,7 +17,9 @@
   <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Platform">
   <img src="https://img.shields.io/badge/Python-3.10-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/PyQt6-6.x-41CD52?style=for-the-badge&logo=qt&logoColor=white" alt="PyQt6">
-  <img src="https://img.shields.io/badge/Tests-438%20passed-2EA043?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-501%20passed-2EA043?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests">
+  <img src="https://github.com/Pignoshower/duoduo-pet/actions/workflows/tests.yml/badge.svg" alt="CI">
+  <img src="https://img.shields.io/badge/License-MIT%20%2F%20%E7%B4%A0%E6%9D%90%E9%9D%9E%E5%95%86%E7%94%A8-8957E5?style=for-the-badge" alt="License">
 
   <br>
 
@@ -55,10 +57,12 @@
 git clone https://github.com/Pignoshower/duoduo-pet
 cd duoduo-pet
 # 先准备素材：下载 Release 里的 frames_opt.zip 解压到此处
-pip install PyQt6
-pip install edge-tts          # 可选，神经网络语音，需联网
+pip install -r requirements.txt      # 运行依赖（PyQt6 + 可选的语音/系统状态）
 copy config.example.json config.json
 python 多多.py
+
+# 不想把 key 写进文件也行：设环境变量（程序优先读它，且永不写回 config.json）
+# $env:DUODUO_API_KEY="sk-…"        # 也认 DEEPSEEK_API_KEY / OPENAI_API_KEY
 ```
 
 打包：`python build_exe.py --clean`
@@ -228,6 +232,9 @@ edge 神经语音 → Windows OneCore → SAPI → PowerShell 四级降级。八
 - **系统目录与程序目录拒删**：`C:\Windows`、`Program Files`、`ProgramData`，以及多多自己的目录（避免误删素材与存档）
 - **破坏性命令当场拒绝**：format、diskpart、shutdown、`del /f /s`、`rd /s`、`rm -rf`、`reg delete`、`net user`、`bcdedit` 等 20 余条规则
 - **大模型不能触发删除、控制台与运行命令**——这些只能由你明确说出口，模型最多提议、由你确认
+- **外发内容可拦截**：剪贴板与拖入文件的内容属于"你没打出来、却要出本机"的东西，开启「发送前确认」（右键 ⚙️ 设置 / `confirm_before_send`）后必须先给你看预览，说「确认」才发、「取消」作废；关着时保持原样
+- **API key 不必落盘**：`DUODUO_API_KEY` / `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` 环境变量优先；程序自己写 `config.json` 时**只写开关类字段，永远不写 key**（有测试钉着）
+- 剪贴板历史只在内存里（最近 10 条），关掉多多就没了
 - 每次删除与执行都记进 `%TEMP%\duoduo.log`
 
 ---
@@ -244,13 +251,16 @@ edge-tts 走 aiohttp，不读 Windows 的 IE 代理设置，程序会自己从�
 
 | 文件 | 内容 |
 |---|---|
-| `多多.py` | 窗口、绘制、动画状态机、行为、本地意图、工具派发、敏感操作闸门 |
-| `ai_assistant.py` | 大模型客户端、提示词、动作/工具/情绪标签解析、站点与文件查找 |
+| `多多.py` | 窗口、绘制、动画状态机、行为、本地意图、工具派发、敏感操作闸门、外发隐私闸门 |
+| `ai_assistant.py` | 大模型客户端、提示词、动作/工具/情绪标签解析、站点与文件查找、配置读写 |
 | `pet_tools.py` | 语音、日程、安静模式、系统状态、音量、剪贴板历史、回收站删除 |
-| `app_health.py` | 日志、单实例锁、开机自启、配置自检、空闲检测、全屏检测 |
+| `app_health.py` | 日志、版本号、后台任务池、单实例锁、开机自启、配置自检、空闲检测、全屏检测 |
 | `build_exe.py` | PyInstaller 打包，图标由素材首帧生成 |
 | `pipeline.py`、`snapshot.py` | 素材流水线与快照回退，只在你要自己改素材时用到 |
 | `使用说明.md` | 全部指令、配置项与排错表 |
+| `requirements.txt`、`requirements-dev.txt` | 运行依赖 / 开发依赖（测试、素材流水线、打包） |
+| `LICENSE`、`LICENSE-ASSETS.md` | 代码 MIT / 美术素材仅限非商用 |
+| `.github/workflows/tests.yml` | CI：每次提交离屏跑不需要素材的 4 套测试 |
 | `docs/` | 上面的预览图与动图 |
 
 <details>
@@ -260,16 +270,20 @@ edge-tts 走 aiohttp，不读 Windows 的 IE 代理设置，程序会自己从�
 
 ```powershell
 $env:QT_QPA_PLATFORM="offscreen"
-python selftest.py          # 29：帧资源、动画状态机、转圈首尾一致
-python test_app_smoke.py    # 31：应用级冒烟
+python selftest.py          # 29：帧资源、动画状态机、转圈首尾一致（需 frames_opt/）
+python test_app_smoke.py    # 31：应用级冒烟（需 frames_opt/）
 python test_assistant.py    # 198：大模型层（打桩，不联网）、删除与控制台闸门、安静模式
-python test_tools.py        # 180：语音、日程、音量、快照、删除规则、危险命令
+python test_tools.py        # 193：语音、日程、音量、快照、删除规则、危险命令
+python test_privacy.py      # 26：key 环境变量、不写回 key、外发闸门
+python test_repo_health.py  # 24：依赖/许可/CI 齐全、任务池线程数、版本号
 ```
+
+前两套要做像素级断言，必须有 70MB 的 `frames_opt/`；CI 里没有素材，只跑后四套（共 441 项）。
 
 </details>
 
 ---
 
 <div align="center">
-<sub>角色形象由 AI 生成视频经抠图、对齐、修帧得到。请勿直接商用。</sub>
+<sub>角色形象由 AI 生成视频经抠图、对齐、修帧得到。<br>代码按 MIT 授权，美术素材仅限非商用 —— 见 <a href="LICENSE-ASSETS.md">LICENSE-ASSETS.md</a>。</sub>
 </div>

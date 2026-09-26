@@ -26,6 +26,8 @@ import threading
 import time
 from datetime import datetime, timedelta
 
+import app_health
+
 # =====================================================================
 # 0. 语音配置（从 config.json 的 "tts" 段读取，缺省值在下面）
 # =====================================================================
@@ -136,8 +138,8 @@ def load_tts_config(path=CONFIG_PATH):
             raw = json.load(f)
         tts = raw.get("tts") or {}
         cfg.update({k: v for k, v in tts.items() if v is not None})
-    except Exception:
-        pass
+    except Exception as e:
+        app_health.log(f"读 config.json 的 tts 段失败（用默认音色）：{e}", level=30)
     return cfg
 
 
@@ -237,8 +239,8 @@ class Speaker:
             if rows:
                 self._sapi_name = rows[0]
                 return rows[0]
-        except Exception:
-            pass
+        except Exception as e:
+            app_health.log(f"取系统音色列表失败，用默认音色：{e}", level=30)
         return "系统音色"
 
     # ---- 对外接口 ----
@@ -326,8 +328,9 @@ class Speaker:
                 text, mood = item, "normal"
             try:
                 self._speak_once(text, mood)
-            except Exception:
-                pass
+            except Exception as e:
+                # 原来这里静默 pass：语音没声时日志里什么都看不到，只能靠猜
+                app_health.log(f"朗读失败（跳过这句继续）：{e.__class__.__name__}: {e}", level=30)
 
     @staticmethod
     def _com_init():
@@ -905,8 +908,8 @@ while ($true) {
                 try:
                     self._voice.Voice = self._voice.GetVoices().Item(idx)
                     self._sapi_name = rows[idx]
-                except Exception:
-                    pass
+                except Exception as e:
+                    app_health.log(f"切换 SAPI 音色失败，保持原音色：{e}", level=30)
         return rows[idx], self.say("换成这个声音啦，喵~")
 
     def _speak_powershell(self, text, rate=0):
@@ -926,8 +929,8 @@ while ($true) {
             )
         try:
             self._proc.communicate(text.encode("utf-8"), timeout=60)
-        except Exception:
-            pass
+        except Exception as e:
+            app_health.log(f"PowerShell 朗读异常结束：{e.__class__.__name__}: {e}", level=30)
         finally:
             with self._lock:
                 self._proc = None

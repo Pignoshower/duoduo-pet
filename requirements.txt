@@ -1,0 +1,11 @@
+# 多多 · 运行依赖（源码运行装这一个就够）
+#   pip install -r requirements.txt
+PyQt6>=6.4
+
+# ---- 以下都是可选的：不装也能跑，多多会自动降级 ----
+# 神经网络语音（不装 -> Windows OneCore -> SAPI -> PowerShell 逐级降级）
+edge-tts>=6.1
+# “系统状态”里的 CPU / 内存占用（不装则这两项显示未知）
+psutil>=5.9
+# SAPI 语音的情绪变调（不装则 SAPI 那条路用系统默认语调）
+pywin32>=306; sys_platform == "win32"

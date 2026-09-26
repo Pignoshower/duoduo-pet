@@ -183,8 +183,8 @@ class FrameLibrary:
             try:
                 with open(mp, 'r', encoding='utf-8') as f:
                     meta = json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                app_health.log(f"读 meta.json 失败（动画节奏退回默认值）：{e}", level=30)
 
         if meta:
             self.logical_w = int(meta.get("logical_w", self.logical_w))
@@ -724,6 +724,7 @@ class PetCat(QWidget):
         self._file_context = None    # 拖进来的文件（后续可追问），见 handle_dropped_files
         self._pending_delete = None  # 等待确认的待删清单（确认后才进回收站）
         self._pending_sensitive = None  # 等待确认的敏感操作（控制台 / 运行命令）
+        self._pending_send = None      # 等待确认的"要发给大模型的内容"（隐私闸门，见 send_gate）
         self.quiet_mode = bool(self.pet_data.get("quiet_mode", 0))   # 安静模式
         self.quiet_range = tuple(self.pet_data.get("quiet_range") or ()) or None
         self.memories = [m for m in (self.pet_data.get("memories") or []) if isinstance(m, str)]
@@ -784,8 +785,8 @@ class PetCat(QWidget):
         try:
             icon_pixmap = self.animations['idle'][0]
             self.tray_icon.setIcon(QIcon(icon_pixmap))
-        except:
-            pass
+        except Exception as e:
+            app_health.log(f"托盘图标没设上（不影响使用）：{e}", level=30)
         
         tray_menu = QMenu()
         tray_menu.setStyleSheet("QMenu { background-color: white; border-radius: 4px; } QMenu::item { padding: 6px 20px; }")
@@ -1479,7 +1480,7 @@ class PetCat(QWidget):
                 self.llm_reply.emit(tools.status_text(st), "", None, "")
             except Exception as e:
                 self.llm_reply.emit(f"喵…读系统信息失败了（{e.__class__.__name__}）", "", None, "sorry")
-        threading.Thread(target=worker, daemon=True).start()
+        app_health.run_async(worker)     # 走共享任务池，不再每次新起线程
         return None
 
     # ---- 打开搜索到的文件 / 文件夹 ----
@@ -1820,6 +1821,10 @@ class PetCat(QWidget):
             ("🔇 安静模式：开" if self.quiet_mode else "🔊 安静模式：关"), self)
         self._quiet_action.triggered.connect(lambda: self.speak(self.set_quiet_mode(), 5000))
         set_menu.addAction(self._quiet_action)
+        self._send_action = QAction(
+            ("✅ 发送前确认：开" if self.send_confirm_on() else "⬜ 发送前确认：关"), self)
+        self._send_action.triggered.connect(lambda: self.speak(self.toggle_send_confirm(), 6000))
+        set_menu.addAction(self._send_action)
         status_action = QAction("❤️ 状态面板", self)
         status_action.triggered.connect(self.check_status)
         set_menu.addAction(status_action)
@@ -2104,14 +2109,18 @@ class PetCat(QWidget):
                 return self.speak(f"喵…读不了这个文件（{e.__class__.__name__}）", 4000)
             prompt = (f"主人把文件「{name}」拖给我了。请用中文先用一句话说这是什么，"
                       f"再总结 2~3 个要点；如果是代码就说明它做什么。\n\n内容：\n{content[:6000]}")
-            # 记住这个文件：之后主人可以直接追问（"这个函数做什么"），
-            # 想清掉说"忘掉这个文件"即可
-            self._file_context = {"name": name, "path": path, "text": content[:4000]}
-            self._drop_pending = name
-            self.speak(f"🤔 我看看「{name}」…", 6000)
-            return self.brain.llm.ask_async(
-                prompt, self.cat_name, self.affection,
-                lambda t, a, tl, mo=None: self.llm_reply.emit(t, a or "", tl, mo or ""))
+
+            def job():
+                # 记住这个文件：之后主人可以直接追问（"这个函数做什么"），
+                # 想清掉说"忘掉这个文件"即可
+                self._file_context = {"name": name, "path": path, "text": content[:4000]}
+                self._drop_pending = name
+                self.speak(f"🤔 我看看「{name}」…", 6000)
+                self.brain.llm.ask_async(
+                    prompt, self.cat_name, self.affection,
+                    lambda t, a, tl, mo=None: self.llm_reply.emit(t, a or "", tl, mo or ""))
+
+            return self.send_gate(f"文件「{name}」的内容", content[:6000], job)
         self.speak(f"「{name}」是 {ext or '未知类型'} 文件（{size // 1024}KB），"
                    f"我打不开它内部，但可以：说“用记事本打开”或“找出它的位置”", 8000)
 
@@ -2172,10 +2181,14 @@ class PetCat(QWidget):
             mode = "summary"
         if not self.brain.llm.configured:
             return self.speak("喵呜…还没配置 API key，我读不出内容（config.json）", 6000)
-        self.speak("🤔 让我看看这一条…", 6000)
-        return self.brain.llm.ask_async(
-            f"{modes[mode]}：\n\n{text[:1200]}", self.cat_name, self.affection,
-            lambda t, a, tl, mo=None: self.llm_reply.emit(t, a or "", tl, mo or ""))
+
+        def job():
+            self.speak("🤔 让我看看这一条…", 6000)
+            self.brain.llm.ask_async(
+                f"{modes[mode]}：\n\n{text[:1200]}", self.cat_name, self.affection,
+                lambda t, a, tl, mo=None: self.llm_reply.emit(t, a or "", tl, mo or ""))
+
+        return self.send_gate("剪贴板里的这一段", text[:1200], job)
 
     # ---- 长期记忆 ----
     def add_memory(self, text):
@@ -2259,6 +2272,40 @@ class PetCat(QWidget):
         state = "开着" if self.quiet_mode else "关着"
         return f"安静模式现在是「{state}」{when}；现在{'该安静' if self._is_quiet_now() else '可以出声'}喵"
 
+    # ---- 隐私闸门：剪贴板与拖入文件的内容要不要发给大模型 ----
+    SEND_PREVIEW = 100          # 确认气泡里最多显示多少字
+
+    def send_confirm_on(self):
+        """设置里是否开了「发送前确认」（config.json 的 confirm_before_send）。"""
+        llm = getattr(self.brain, "llm", None)
+        return bool((getattr(llm, "cfg", None) or {}).get("confirm_before_send"))
+
+    def send_gate(self, label, text, job):
+        """
+        外发闸门：只拦"主人没主动打出来、却要送给大模型"的内容（剪贴板、拖入的文件）。
+        没开这个开关时直接执行，原体验不变；主人自己手打的问题不拦。
+        """
+        n = len(text or "")
+        if not self.send_confirm_on():
+            job()
+            return None
+        head = " ".join((text or "").split())[:self.SEND_PREVIEW]
+        self._pending_send = {"label": label, "chars": n, "job": job}
+        return self.speak(f"要把{label}发给大模型吗？（共 {n} 字）\n「{head}…」\n\n"
+                          f"确认就说「确认」，反悔说「取消」", 16000, mood="alert")
+
+    def toggle_send_confirm(self):
+        """切换「发送前确认」并写回 config.json（只写这一个键，绝不写 api_key）。"""
+        now = not self.send_confirm_on()
+        if not ai.set_config_values(confirm_before_send=now):
+            return "喵…config.json 写不进去，这个开关先不算数"
+        if getattr(self.brain, "llm", None) is not None:
+            self.brain.llm.cfg["confirm_before_send"] = now
+        self._pending_send = None
+        app_health.log(f"发送前确认 -> {'开' if now else '关'}")
+        return (f"发送前确认：{'开' if now else '关'}"
+                + ("（剪贴板/文件内容会先给你过目再发）" if now else "（内容直接发给大模型）"))
+
     # ---- 敏感操作：统一确认闸门（打开控制台 / 删除指定路径 / 运行命令）----
     def ask_sensitive(self, kind, payload, preview):
         """把"将要发生什么"说清楚，等主人确认；确认前一律不动手。"""
@@ -2266,7 +2313,12 @@ class PetCat(QWidget):
         return self.speak(f"{preview}\n\n确认就说「确认」，反悔说「取消」", 16000, mood="alert")
 
     def confirm_sensitive(self):
-        """执行待确认的敏感操作。"""
+        """执行待确认的敏感操作（或放行待确认的外发内容）。"""
+        send = getattr(self, "_pending_send", None)
+        if send:
+            self._pending_send = None
+            app_health.log(f"主人确认外发：{send['label']}（{send['chars']} 字）")
+            return send["job"]()
         op = getattr(self, "_pending_sensitive", None)
         if not op:
             return self.speak("喵？我没有等着办的事呀", 4000)
@@ -2386,6 +2438,7 @@ class PetCat(QWidget):
         # 否则"取消"之后那句"要打开控制台吗"还挂着，下次说"确认"就真开了
         self._pending_delete = None
         self._pending_sensitive = None
+        self._pending_send = None
         return self.speak("好，那我不动啦", 3500)
 
     def delete_from_found(self, spec):
@@ -2485,7 +2538,11 @@ class PetCat(QWidget):
             return
         try:
             full = app_health.fullscreen_active()
-        except Exception:
+        except Exception as e:
+            # 这个轮询很频繁，只记第一次，免得日志被刷满
+            if not getattr(self, "_fs_err_logged", False):
+                self._fs_err_logged = True
+                app_health.log(f"全屏检测失败，自动避让这次不生效：{e}", level=30)
             return
         if full and self.isVisible() and not self._dragging:
             self.hide()
@@ -2555,9 +2612,14 @@ class PetCat(QWidget):
             return self.speak("喵呜…还没配置 API key，我读不出剪贴板里的内容（config.json）", 6000)
         snippet = text[:1200]
         prompt = f"{modes[mode]}：\n\n{snippet}"
-        self.speak("🤔 让我看看剪贴板…", 6000)
-        self.brain.llm.ask_async(prompt, self.cat_name, self.affection,
-                                 lambda t, a, tool, mood=None: self.llm_reply.emit(t, a or "", tool, mood or ""))
+
+        def job():
+            self.speak("🤔 让我看看剪贴板…", 6000)
+            self.brain.llm.ask_async(prompt, self.cat_name, self.affection,
+                                     lambda t, a, tool, mood=None: self.llm_reply.emit(
+                                         t, a or "", tool, mood or ""))
+
+        return self.send_gate("剪贴板里的这一段", snippet, job)
 
     def feed_cat(self):
         """喂食：任何时候都能喂（不再因为好感度满而拒绝）；好感度只在未满时增长。"""
@@ -2836,7 +2898,8 @@ def startup_guard():
     try:
         _me = os.path.join(app_health.app_dir(), "多多.exe" if getattr(sys, "frozen", False) else "多多.py")
         _st = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(_me)))
-        app_health.log(f"版本时间：{_st}（{os.path.basename(_me)}）—— 和你预期不一致就说明跑的是旧进程")
+        app_health.log(f"多多 v{app_health.APP_VERSION}（Python {sys.version.split()[0]}）"
+                       f"　文件时间：{_st}（{os.path.basename(_me)}）—— 和你预期不一致就说明跑的是旧进程")
     except Exception:
         pass
     app_health.log("=== 多多启动 ===" + " ".join(sys.argv[1:])

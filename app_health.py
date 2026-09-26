@@ -12,13 +12,51 @@ app_health.py —— 运行保障：日志、单实例、开机自启、配置�
 import ctypes
 import logging
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
 from logging.handlers import RotatingFileHandler
 
 LOG_PATH = os.path.join(os.environ.get("TEMP", "."), "duoduo.log")
 SHORTCUT_NAME = "多多桌宠.lnk"
+APP_VERSION = "1.1.0"        # 版本号只改这一处：启动日志会打出来，方便确认跑的是哪个版本
+
+
+# ------------------------------------------------------------------
+# 后台任务池：固定几个常驻守护线程
+#   原先"读系统信息""问大模型"都是一次调用新起一个线程，长时间使用线程只增不减；
+#   现在统一丢进这个池子（最多 3 个并发，多余的排队），线程数恒定，且都是守护线程，
+#   关窗口时不会拖住进程退出。
+# ------------------------------------------------------------------
+_TASK_QUEUE = queue.Queue()
+_TASK_WORKERS = 3
+_task_lock = threading.Lock()
+_task_workers_started = False
+
+
+def _task_loop():
+    while True:
+        fn = _TASK_QUEUE.get()
+        if fn is None:
+            return
+        try:
+            fn()
+        except Exception as e:
+            log(f"后台任务出错：{e.__class__.__name__}: {e}", level=logging.ERROR)
+
+
+def run_async(fn):
+    """把 fn 交给后台任务池执行（首次调用时懒启动 3 个常驻守护线程）。"""
+    global _task_workers_started
+    with _task_lock:
+        if not _task_workers_started:
+            for i in range(_TASK_WORKERS):
+                threading.Thread(target=_task_loop, name=f"duoduo-task-{i}",
+                                 daemon=True).start()
+            _task_workers_started = True
+    _TASK_QUEUE.put(fn)
 
 
 def app_dir():
