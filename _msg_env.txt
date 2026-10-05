@@ -1,0 +1,9 @@
+测试改成环境无关：CI 上没有桌面文件夹、也没有可用语音
+
+首次在 GitHub runner 上跑 full 档，暴露三处"本机能过、干净环境过不了"的测试：
+
+1. 我新加的"描述文件夹"执行断言假设桌面存在"项目"文件夹 —— runner 上没有。
+   改成在**搜索根**（当前目录，find_folders/find_files 会搜它）下自建临时目录再打开。
+2. 多多 test_assistant 用原始 Popen 捕获做计数，而 runner 上没有可用语音会退化成
+   powershell onecore_daemon.ps1（它也走 Popen），把"指定程序打开 / 找不到程序"带偏。
+   改成和元宝一致：过滤掉 TTS 守护进程那几次调用再判断。

@@ -308,14 +308,24 @@ try:
                   isinstance(_a, tuple) and _a and _a[0] == want, str(_a))
         _r, _a = pet.brain._handle_local("新建一个文件夹")
         check("“新建一个文件夹”不被当成打开", _a is None, str(_a))
-        popen_calls.clear()
-        _r, _a = pet.brain._handle_local("打开桌面上的项目文件夹")
-        if isinstance(_a, tuple):
-            pet._do_command(*_a)
-        pump(200)
-        check("“打开桌面上的项目文件夹”真的调起资源管理器",
-              bool(popen_calls) and popen_calls[0][0][:1] == ["explorer"],
-              str(popen_calls[:1]))
+        # ★ 描述的文件夹要真的能打开。
+        # 注意别依赖"桌面上正好有个叫某某的文件夹"——CI 的 runner 上没有（这条曾经把
+        # full 档跑红过）。find_folders/find_files 的搜索根包含**当前目录**，
+        # 所以这里在项目目录下自建一个临时目录，再用自然说法去打开它。
+        _tf_dir = os.path.join(os.getcwd(), "_test_descfolder_dd")
+        os.makedirs(_tf_dir, exist_ok=True)
+        try:
+            popen_calls.clear()
+            _r, _a = pet.brain._handle_local("打开 _test_descfolder_dd 文件夹")
+            if isinstance(_a, tuple):
+                pet._do_command(*_a)
+            pump(400)
+            check("“打开 <名字> 文件夹”真的调起资源管理器",
+                  bool(popen_calls) and popen_calls[0][0][:1] == ["explorer"]
+                  and "_test_descfolder" in str(popen_calls[0][0]),
+                  str(popen_calls[:1]))
+        finally:
+            shutil.rmtree(_tf_dir, ignore_errors=True)
     finally:
         mod.subprocess.Popen = real_popen
 
@@ -427,21 +437,39 @@ try:
     real_which = mod.shutil.which
     launched = []
     mod.subprocess.Popen = lambda *a, **k: (launched.append(a[0] if a else None) or None)
+
+    def _opened():
+        """只看"打开文件"那几次调用：TTS 的 onecore 守护进程也会走 Popen，
+        而且是异步的，可能正好落在这一段里（与打开方式无关，别把它算进来）。
+        没有可用语音的机器（例如 CI 的 runner）一定会退化到它，不滤掉就会把
+        "指定程序打开 / 找不到程序"两项计数带偏。"""
+        out = []
+        for item in launched:
+            s = str(item).lower()
+            if "onecore_daemon" in s or "powershell" in s or s.endswith("pwsh.exe'"):
+                continue
+            out.append(item)
+        return out
+
     try:
         pet.handle_user_message("用记事本打开第1个")
         pump(200)
+        opened = _opened()
         check("指定程序打开",
-              bool(launched) and "notepad" in str(launched[-1]).lower()
-              and "pet_data" in str(launched[-1]), str(launched[-1:]))
+              bool(opened) and "notepad" in str(opened[-1]).lower()
+              and "pet_data" in str(opened[-1]), str(opened[-1:]))
         pet.handle_user_message("换个方式打开第1个")
         pump(200)
+        opened = _opened()
         check("换个方式→Windows 打开方式选择框",
-              bool(launched) and "OpenAs_RunDLL" in str(launched[-1]), str(launched[-1:]))
+              bool(opened) and "OpenAs_RunDLL" in str(opened[-1]), str(opened[-1:]))
+        n_before = len(_opened())
         mod.shutil.which = lambda name: None            # 模拟"没装这个程序"
         pet.handle_user_message("用photoshop打开第1个")
         pump(200)
         check("找不到程序时给提示且不乱开",
-              len(launched) == 2 and "找不到" in pet.bubble.label.text(), pet.bubble.label.text()[:30])
+              len(_opened()) == n_before and "找不到" in pet.bubble.label.text(),
+              f"opened={len(_opened())} before={n_before} msg={pet.bubble.label.text()[:30]}")
     finally:
         mod.subprocess.Popen = real_popen2
         mod.shutil.which = real_which
