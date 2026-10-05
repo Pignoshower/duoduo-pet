@@ -210,6 +210,42 @@ def find_files(query: str, roots=None, limit=SEARCH_LIMIT):
     return [r[2] for r in results[:limit]]
 
 
+
+def find_folders(query: str, roots=None, limit: int = 5):
+    """按名字找**文件夹**（搜索根与剪枝与 find_files 一致）。返回路径列表。"""
+    query = (query or "").strip().lower()
+    if not query or len(query) < 2:
+        return []
+    roots = roots or [r for r in SEARCH_ROOTS if os.path.isdir(r)]
+    hits = []              # (score, mtime, path)
+    visited = 0
+    for root in roots:
+        if visited >= SEARCH_MAX_VISIT:
+            break
+        for dirpath, dirnames, _files in os.walk(root):
+            visited += 1
+            if visited >= SEARCH_MAX_VISIT:
+                break
+            dirnames[:] = [d for d in dirnames
+                           if not d.startswith((".", "$")) and d not in
+                           ("node_modules", "AppData", "__pycache__", "site-packages")]
+            depth = dirpath[len(root):].count(os.sep)
+            if depth > SEARCH_MAX_DEPTH:
+                dirnames[:] = []
+                continue
+            for name in dirnames:
+                low = name.lower()
+                if query in low:
+                    score = 100 if low == query else (80 if low.startswith(query) else 60)
+                    try:
+                        mtime = os.path.getmtime(os.path.join(dirpath, name))
+                    except OSError:
+                        mtime = 0
+                    hits.append((score, mtime, os.path.join(dirpath, name)))
+    hits.sort(key=lambda h: (-h[0], -h[1]))
+    return [h[2] for h in hits[:limit]]
+
+
 def short_path(path: str, keep_dirs: int = 1):
     """压缩显示路径：只保留最后 keep_dirs 层目录 + 文件名。"""
     parts = path.replace("\\", "/").split("/")
@@ -362,6 +398,9 @@ SYSTEM_PROMPT = """你是{name}，一只住在主人电脑桌面上的小猫宠�
 工具：[tool: open bilibili] 打开网站（参数可以是站点名如 bilibili/百度/知乎，或完整网址）/
       [tool: search 关键词] 浏览器搜索 / [tool: find 文件名] 在电脑里找文件 /
       [tool: openfile 2] 打开刚才找到的第 2 个文件（参数是序号，也可以直接给文件名）/
+      [tool: openfolder 2] 打开刚才找到的第 2 个文件**所在的文件夹**并在资源管理器里选中；
+      参数也可以是文件夹名字或完整路径，例如 [tool: openfolder 项目] / [tool: openfolder D:\\素材]
+      （主人说"打开文件夹/打开桌面上的项目文件夹/打开 D:\\素材"时用这个）/
       [tool: status] 汇报电量内存网络 / [tool: screenshot] 截屏保存到桌面 /
       [tool: volume up|down|mute] 调大 / 调小 / 静音系统音量 /
       [tool: clipboard translate|summary|explain|polish|reply] 翻译 / 总结 / 解释 / 润色 / 帮回复

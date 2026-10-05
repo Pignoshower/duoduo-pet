@@ -339,7 +339,73 @@ class AIBrain:
                       or any(k in low for k in ("打开它", "打开那个", "开一下它",
                                                 "打开这个文件", "打开这个文件夹"))
                       or open_tgt is not None)
-        if any(k in low for k in ("文件夹", "目录", "所在位置", "在哪个文件夹")) and wants_prev:
+        # "打开文件夹 / 打开所在文件夹 / 它在哪个文件夹" 这类**不带序号**的自然说法以前识别不到
+        # （要求命中上面那串固定短语），会漏到大模型那边，表现就是"说了没反应/打不开"。
+        # 现在：只要提到"文件夹/目录/所在位置"这类词，**且确实有上一次的搜索结果**，就算数。
+        # 但排除"音乐/桌面/下载/文档…"这些别的功能自己管的文件夹（例如"打开音乐文件夹"）。
+        FOLDER_WORDS = ("文件夹", "目录", "所在位置", "所在目录", "在哪儿", "在哪")
+        OPEN_WORDS = ("打开", "开一下", "看看", "瞅瞅", "看一下", "去", "在哪", "位置")
+        # 只排除**本程序真的另有功能**的文件夹：音乐库（打开音乐文件夹）、截图。
+        # 早先把"桌面/下载/文档/图片/视频"也排除掉了，结果主人说"打开**桌面**上的项目文件夹"
+        # 整句被排除、漏给大模型 → 表现就是"说了打不开"（任务日志里抓到过）。
+        OWNED_FOLDERS = ("音乐", "歌曲", "歌", "截图")
+        folder_ask = any(k in low for k in FOLDER_WORDS)
+        open_ask = any(k in low for k in OPEN_WORDS)
+        m_path = re.search(r'[A-Za-z]:[\\/][^\s，。！？、"\'）)]+', text)
+        path_hit = None
+        if m_path:
+            cand = m_path.group(0).rstrip("\\/").strip()
+            if os.path.exists(cand):
+                path_hit = cand
+        if path_hit:
+            return None, ("open_path", path_hit)          # ① 直接给了路径
+        if open_ask and not folder_ask:
+            # ② "打开多多.py" 这类：句子里像一个文件名 → 找到就打开它
+            m_file = re.search(r"[^\s，。！？、]{1,60}\.(py|txt|md|docx?|xlsx?|pptx?|pdf|png|jpe?g|gif|mp4|mp3|zip|rar|7z|exe|json|csv|log|lnk|bat|ps1)",
+                               text, re.I)
+            if m_file and not any(k in low for k in ("网站", "浏览器")):
+                fname = m_file.group(0).strip()
+                changed = True
+                while changed:
+                    changed = False
+                    for pre in ("帮我", "帮忙", "请", "麻烦", "主人", "你", "我",
+                                "打开", "开一下", "看看", "瞅瞅", "看一下", "去"):
+                        if fname.startswith(pre):
+                            fname = fname[len(pre):]
+                            changed = True
+                if len(fname) >= 3:
+                    return None, ("open_named_file", fname)
+        if folder_ask and open_ask and not any(k in low for k in OWNED_FOLDERS):
+            # ③ 有明确序号（"打开第1个所在文件夹"）→ 直接按序号打开上次结果的位置
+            if open_idx is not None:
+                return None, ("open_found_folder", open_idx)
+            # ④ "打开桌面上的项目文件夹" → 剥掉动词/方位词/对象词，剩下的是文件夹名字
+            key = text.strip()
+            # 反复剥掉前置语气/动词，直到不动为止（否则"那你帮我打开…"只会剥掉一个"那"）
+            pre_words = ("帮我", "帮忙", "请", "麻烦", "主人", "你", "我", "我要", "我想",
+                         "那", "这", "就", "先", "再", "把", "给", "一个", "个",
+                         "打开", "开一下", "看看", "瞅瞅", "看一下", "去", "在", "到")
+            changed = True
+            while changed:
+                changed = False
+                for pre in pre_words:
+                    if key.startswith(pre):
+                        key = key[len(pre):]
+                        changed = True
+            for w in ("桌面上的", "桌面的", "电脑上的", "桌面", "我的", "那个", "这个",
+                      "它", "里面的", "里的", "里", "一下子", "一下", "哪个", "哪儿", "哪"):
+                key = key.replace(w, "")
+            key = re.sub(r"(所在位置|所在目录|所在的文件夹|所在文件夹|文件夹|目录|位置|在哪|在哪里|在哪儿|呢|吧|啊|的)+$", "", key)
+            key = key.strip(" 　的，。！？、")
+            # 剥完只剩语气词/指代词 → 说明主人没给名字，是"打开上次那个的位置"
+            SCAFFOLD = set("的在哪个儿呢吧啊了是我你它这那就先再把给一二三")
+            if key and all(ch in SCAFFOLD for ch in key):
+                key = ""
+            if re.fullmatch(r"第[0-9一二三四五六七八九十]+个?", key):
+                key = ""                      # "第1个"是序号，不是文件夹名字
+            if len(key) >= 2:
+                return None, ("open_named_folder", key)
+            # ④ 只有"打开文件夹"这种 → 打开上次搜到的东西所在位置
             return None, ("open_found_folder", open_idx or 1)
         if wants_prev:
             if open_tgt is not None:
@@ -1321,11 +1387,27 @@ class PetCat(QWidget):
             self.speak("喵…点不动这个链接", 4000)
 
     def open_path(self, path):
-        """直接打开某个路径（气泡点击用）。"""
+        """打开一个路径：**目录**交给资源管理器；**文件**用默认程序打开（与点气泡的行为一致）。
+
+        （曾经这里被一个"文件也在资源管理器里选中"的实现覆盖过，结果点文件名不再打开文件——
+          回归测试"点文件名即打开"就是那次抓出来的。）
+        """
+        p = os.path.normpath(str(path))
         try:
-            os.startfile(path)
-            return self.speak(f"打开啦：{ai.short_path(path)}", 3500)
+            if os.path.isdir(p):
+                subprocess.Popen(["explorer", p],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+                app_health.log(f"打开目录：{p}")
+                return self.speak(f"打开啦：{ai.short_path(p)}", 4000)
+            if os.path.isfile(p):
+                os.startfile(p)
+                app_health.log(f"用默认程序打开文件：{p}")
+                return self.speak(f"打开啦：{ai.short_path(p)}", 3500)
+            app_health.log(f"打开路径失败：不存在 {p}", level=30)
+            return self.speak(f"喵…这个位置不存在：{ai.short_path(p)}", 4500)
         except Exception as e:
+            app_health.log(f"打开路径失败：{type(e).__name__}: {e}", level=40)
             return self.speak(f"喵…打不开（{e.__class__.__name__}）", 4000)
 
     # ---- 多显示器：一切都跟着小猫所在的屏幕 ----
@@ -1550,10 +1632,48 @@ class PetCat(QWidget):
             return self.speak(f"喵…打不开（{e.__class__.__name__}）；"
                               f"说“换个方式打开第{idx}个”可以自己挑程序", 6000)
 
+    def open_named_file(self, name):
+        """主人直接说"打开某某.py"：找到就用默认程序打开它。"""
+        name = (name or "").strip().strip('"“”')
+        if not name:
+            return self.speak("喵？要打开哪个文件呀", 4000)
+        if os.path.isfile(name):
+            return self.open_path(name)
+        hits = ai.find_files(name)
+        if hits:
+            self.remember_found(hits)
+            self._found_bubble(hits)
+            app_health.log(f"按名字打开文件：{name} -> {hits[0]}")
+            return self.open_found(1)
+        app_health.log(f"按名字打开文件：没找到 {name}", level=30)
+        return self.speak(f"喵…桌面/文档/下载里没找到「{name}」", 5000)
+
+    def open_described_folder(self, hint):
+        """打开主人"描述"的文件夹：先按文件夹名找，再退回按文件名找（打开它所在目录）。"""
+        hint = (hint or "").strip().strip('"“”')
+        if not hint:
+            return self.open_found_folder(1)
+        if os.path.isdir(hint):                       # 本身就是一个目录
+            return self.open_path(hint)
+        if os.path.isfile(hint):                      # 是个文件 → 打开它所在目录并选中
+            return self.open_path(hint)
+        dirs = ai.find_folders(hint)
+        if dirs:
+            app_health.log(f"按名字打开文件夹：{hint} -> {dirs[0]}")
+            return self.open_path(dirs[0])
+        files = ai.find_files(hint)
+        if files:
+            self.remember_found(files)
+            app_health.log(f"没有同名文件夹，改为打开「{hint}」所在目录：{files[0]}")
+            return self.open_found_folder(1)
+        app_health.log(f"打开文件夹：没找到叫「{hint}」的文件夹或文件", level=30)
+        return self.speak(f"喵…桌面/文档/下载里都没找到叫「{hint}」的文件夹", 5000)
+
     def open_found_folder(self, which=1):
         """打开"第 which 个搜索结果所在的文件夹"并在资源管理器里选中它。"""
         found = getattr(self, "_last_found", [])
         if not found:
+            app_health.log("打开文件夹：还没有搜索结果，已提示先找文件")
             return self.speak("喵？先跟我说“找文件 XXX”，我找到之后才能打开它的位置", 5000)
         try:
             idx = int(which)
@@ -1563,9 +1683,20 @@ class PetCat(QWidget):
         target = found[idx - 1]
         try:
             folder = target if os.path.isdir(target) else os.path.dirname(target)
-            subprocess.Popen(["explorer", "/select,", os.path.normpath(target)])
+            if not os.path.exists(target):
+                app_health.log(f"打开文件夹：目标已不存在 {target}", level=30)
+                return self.speak(f"喵…这个文件好像被移走了：{ai.short_path(target)}", 5000)
+            # /select, 和路径**必须分成两个参数**：合成一个参数时 Python 会给整串加引号，
+            # 资源管理器反而解析不了（实测：合成一个参数会打开"文档"且什么都不选中）。
+            # 显式把三个标准句柄指到 DEVNULL：打包成无控制台的 windowed exe 时，
+            # 继承来的句柄可能无效，个别环境下 Popen 会直接失败。
+            subprocess.Popen(["explorer", "/select,", os.path.normpath(target)],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+            app_health.log(f"打开文件夹：explorer /select, {target}（第 {idx} 个）")
             return self.speak(f"已经在资源管理器里打开：{ai.short_path(folder)}", 4500)
         except Exception as e:
+            app_health.log(f"打开文件夹失败：{type(e).__name__}: {e}", level=40)
             return self.speak(f"喵…打不开文件夹（{e.__class__.__name__}）", 4000)
 
     # ---- 语音音色 ----
@@ -1895,6 +2026,11 @@ class PetCat(QWidget):
             self._stop_pace()
         elif action == "feed":
             self.feed_cat()
+        elif action == "open_folder":
+            # 大模型那条路也能"真的去打开"，而不是只回一句话
+            self.open_found_folder(1)
+        elif action == "open_found":
+            self.open_found(1)
         elif action in ("yawn", "stretch", "knead", "turn", "pounce"):
             self._play_action(action)       # 一次性动作片段，播完自动回发呆
         elif action == "preview_voice":
@@ -2007,6 +2143,12 @@ class PetCat(QWidget):
             which = args[0] if args else 1
             app = args[1] if len(args) > 1 else None
             self.open_found(which, app)
+        elif cmd == "open_path":
+            self.open_path(args[0] if args else "")
+        elif cmd == "open_named_file":
+            self.open_named_file(args[0] if args else "")
+        elif cmd == "open_named_folder":
+            self.open_described_folder(args[0] if args else "")
         elif cmd == "open_found_folder":
             self.open_found_folder(args[0] if args else 1)
         elif cmd == "focus":
@@ -2138,6 +2280,14 @@ class PetCat(QWidget):
                         + "（已经记住，可用 openfile 序号打开）")
                 self.speak(f"没找到跟「{arg}」有关的文件呢", 4000)
                 return f"没有找到与「{arg}」有关的文件"
+            if name == "openfolder":
+                # 序号 → 打开"第 N 个搜索结果"所在位置；名字/路径 → 按描述打开
+                a = str(arg).strip().strip('"“”')
+                if a.isdigit():
+                    self.open_found_folder(int(a))
+                    return f"已在资源管理器里打开第 {a} 个结果的位置"
+                self.open_described_folder(a)
+                return f"已尝试打开「{a}」对应的文件夹"
             if name == "openfile":
                 which = int(arg) if str(arg).strip().isdigit() else (ai.parse_open_index(str(arg)) or 1)
                 if str(arg).strip().isdigit() or which > 1:

@@ -279,6 +279,43 @@ try:
         check("打开所在文件夹调 explorer /select",
               popen_calls and popen_calls[0][0][:1] == ["explorer"] and "/select," in popen_calls[0][0],
               str(popen_calls[:1]))
+        # /select, 与路径必须是**两个参数**：合成一个会被加引号，资源管理器反而打不开
+        check("explorer 参数形态正确（/select, 与路径分开）",
+              popen_calls and popen_calls[0][0][1] == "/select,"
+              and len(popen_calls[0][0]) == 3,
+              str(popen_calls[:1]))
+        # 不带序号的自然说法也必须识别到（这是曾经的 bug：说了"打开文件夹"没反应）
+        for phrase in ("打开文件夹", "打开所在文件夹", "它在哪个文件夹", "打开这个文件夹",
+                       "打开所在目录"):
+            popen_calls.clear()
+            pet.handle_user_message(phrase)
+            pump(150)
+            check(f"口语“{phrase}”能打开所在文件夹", bool(popen_calls), str(popen_calls[:1]))
+        # 但别的功能管的文件夹不能被抢走
+        reply, act = pet.brain._handle_local("打开音乐文件夹")
+        check("“打开音乐文件夹”不被当成本次搜索的文件夹",
+              not (isinstance(act, tuple) and act and act[0] == "open_found_folder"),
+              str(act))
+        # 主人真实说过的几句（任务日志里抓到"打开桌面上的项目文件夹"被漏给大模型）
+        import tempfile as _tf
+        _d = _tf.mkdtemp(prefix="dd_descfolder_")
+        for phrase, want in (("打开桌面上的项目文件夹", "open_named_folder"),
+                             ("那你帮我打开项目文件夹", "open_named_folder"),
+                             (f"打开 {_d}", "open_path"),
+                             ("打开 多多.py", "open_named_file")):
+            _r, _a = pet.brain._handle_local(phrase)
+            check(f"“{phrase}” -> {want}",
+                  isinstance(_a, tuple) and _a and _a[0] == want, str(_a))
+        _r, _a = pet.brain._handle_local("新建一个文件夹")
+        check("“新建一个文件夹”不被当成打开", _a is None, str(_a))
+        popen_calls.clear()
+        _r, _a = pet.brain._handle_local("打开桌面上的项目文件夹")
+        if isinstance(_a, tuple):
+            pet._do_command(*_a)
+        pump(200)
+        check("“打开桌面上的项目文件夹”真的调起资源管理器",
+              bool(popen_calls) and popen_calls[0][0][:1] == ["explorer"],
+              str(popen_calls[:1]))
     finally:
         mod.subprocess.Popen = real_popen
 
