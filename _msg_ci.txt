@@ -1,0 +1,14 @@
+CI 修复：strftime 格式串里不能放中文
+
+英文/CP1252 环境的 Windows（GitHub Actions 的 runner 就是）上，strftime 会走 C 运行库的
+locale 编码，格式串里的中文直接抛：
+
+  UnicodeEncodeError: 'locale' codec can't encode character '\u6708' in position 2
+
+本机是中文代码页（936）所以一直没复现，一上 CI 就把 quick 档跑红了。
+改成只让 strftime 处理纯 ASCII、中文用 f-string 拼：
+
+  _now = datetime.now()
+  _now_text = f"{_now.month}月{_now.day}日 {_now:%H:%M}"
+
+已用 locale.setlocale("English_United States.1252") 复现旧写法崩溃、并验证新写法正常。

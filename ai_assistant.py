@@ -609,8 +609,14 @@ class LLMClient:
     def _body(self, user_text, name, affection, stream=False,
               with_history=True, max_tokens=None):
         """拼请求体。with_history=False 用于工具回灌那一轮（不带历史、更快、不污染记忆）。"""
+        # 注意：格式串里**不能**放中文再交给 strftime —— Windows 上 strftime 走 C 运行库的
+        # locale 编码，英文/CP1252 环境（例如 GitHub Actions 的 runner）会直接抛
+        # UnicodeEncodeError: 'locale' codec can't encode character '\u6708'。
+        # 所以只让 strftime 处理纯 ASCII，中文用 f-string 拼。
+        _now = datetime.now()
+        _now_text = f"{_now.month}月{_now.day}日 {_now:%H:%M}"
         messages = [{"role": "system", "content": self.system.format(
-            name=name, affection=affection, now=datetime.now().strftime("%m月%d日 %H:%M"))}]
+            name=name, affection=affection, now=_now_text)}]
         if with_history:
             messages += self.history
         messages.append({"role": "user", "content": user_text})
