@@ -47,8 +47,17 @@ spec.loader.exec_module(mod)
 
 # 视频流水线模块（只读它们的常量，用来防止"程序生成的状态"被旧素材重建覆盖）
 sys.path.insert(0, HERE)
-import prepare_frames as prep          # noqa: E402
-import integrate_videos as integ        # noqa: E402
+# 素材流水线模块：只读它们的常量，用来防止"程序生成的状态"被旧素材重建覆盖。
+# 注意：这些工具在仓库里可能**不存在**（多多那边按设计不上传，见 .gitignore），
+# 所以拿不到就跳过依赖它的那一条断言，而不是让整档 CI 崩掉。
+try:
+    import prepare_frames as prep          # noqa: E402
+    import integrate_videos as integ        # noqa: E402
+    _have_pipeline = True
+except Exception as _e:                     # noqa: BLE001
+    prep = integ = None
+    _have_pipeline = False
+    print(f"（素材流水线模块不可用：{type(_e).__name__}: {_e}；跳过依赖它的断言）")
 
 results = []
 
@@ -179,9 +188,12 @@ try:
           float(np.abs(t0_rgb - i0_rgb).max()) <= 3 and float(np.abs(t0_a - i0_a).max()) <= 8)
     check("转身末帧与发呆一致（转完回同一姿势）",
           float(np.abs(tN_rgb - i0_rgb).max()) <= 3 and float(np.abs(tN_a - i0_a).max()) <= 8)
-    check("turn 不在视频管线里（防止被旧素材重建覆盖）",
-          "turn" not in prep.KNOWN_STATES and "turn" not in [s[0] for s in integ.SOURCES],
-          f"KNOWN_STATES={prep.KNOWN_STATES}")
+    if _have_pipeline:
+        check("turn 不在视频管线里（防止被旧素材重建覆盖）",
+              "turn" not in prep.KNOWN_STATES and "turn" not in [s[0] for s in integ.SOURCES],
+              f"KNOWN_STATES={prep.KNOWN_STATES}")
+    else:
+        print("SKIP turn 不在视频管线里（素材流水线模块不在仓库/未安装）")
 
     # --- 散步（走步动画） ---
     check("walk animation loaded", 'walk' in pet.animations and len(pet.animations['walk']) >= 6,

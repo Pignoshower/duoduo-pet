@@ -5,6 +5,8 @@
 # 测试（selftest.py / test_app_smoke.py 做像素级断言）与素材流水线
 numpy>=1.24
 Pillow>=10.0
+# 素材流水线（split_sheets / build_puppet / prepare_frames / mark_eyes 都用 cv2）
+opencv-python>=4.8
 
 # 打包 exe：python build_exe.py --clean
 pyinstaller>=6.0
