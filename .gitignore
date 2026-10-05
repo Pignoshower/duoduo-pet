@@ -72,3 +72,7 @@ frames_opt/_baseline.json
 # ASCII 名的那份 exe（中文名 `多多.exe` 已在上面忽略，这份曾经漏掉被提交过）
 /duoduo.exe
 /duoduo-*.exe
+
+# 写提交信息用的临时文件（不要再被 add 进去）
+_msg_*.txt
+_commitmsg.txt
